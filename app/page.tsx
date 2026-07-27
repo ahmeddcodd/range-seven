@@ -124,6 +124,7 @@ export default function Home() {
     start: () => void;
     reload: () => void;
     setFiring: (value: boolean) => void;
+    setAiming: (value: boolean) => void;
     aimDelta: (dx: number, dy: number) => void;
     moveInput: (x: number, y: number) => void;
     switchWeapon: (index: number) => void;
@@ -142,6 +143,7 @@ export default function Home() {
   const [hitPulse, setHitPulse] = useState(0);
   const [damageFlash, setDamageFlash] = useState(0);
   const [reloading, setReloading] = useState(false);
+  const [aiming, setAiming] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const joystickRef = useRef<HTMLDivElement>(null);
   const joyPointer = useRef<number | null>(null);
@@ -161,8 +163,8 @@ export default function Home() {
     if (!mount) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x151c1c);
-    scene.fog = new THREE.FogExp2(0x1b2423, 0.011);
+    scene.background = new THREE.Color(0x07090c);
+    scene.fog = new THREE.FogExp2(0x10151a, 0.0065);
 
     const camera = new THREE.PerspectiveCamera(
       68,
@@ -181,16 +183,16 @@ export default function Home() {
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 1.24;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.domElement.setAttribute("aria-label", "Three-dimensional firing range");
     mount.appendChild(renderer.domElement);
 
-    const hemi = new THREE.HemisphereLight(0xadc9c5, 0x433828, 1.4);
+    const hemi = new THREE.HemisphereLight(0xd7e3e2, 0x25282a, 1.75);
     scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xffe5b2, 3.2);
-    sun.position.set(-5, 15, 9);
+    const sun = new THREE.DirectionalLight(0xf2f7f5, 2.4);
+    sun.position.set(-8, 12, 12);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.left = -16;
@@ -199,63 +201,157 @@ export default function Home() {
     sun.shadow.camera.bottom = -8;
     scene.add(sun);
 
+    const floorCanvas = document.createElement("canvas");
+    floorCanvas.width = 512;
+    floorCanvas.height = 512;
+    const floorContext = floorCanvas.getContext("2d")!;
+    floorContext.fillStyle = "#777874";
+    floorContext.fillRect(0, 0, 512, 512);
+    floorContext.strokeStyle = "rgba(34,37,38,.22)";
+    floorContext.lineWidth = 2;
+    for (let i = 0; i <= 512; i += 128) {
+      floorContext.beginPath();
+      floorContext.moveTo(i, 0);
+      floorContext.lineTo(i, 512);
+      floorContext.stroke();
+      floorContext.beginPath();
+      floorContext.moveTo(0, i);
+      floorContext.lineTo(512, i);
+      floorContext.stroke();
+    }
+    for (let i = 0; i < 190; i++) {
+      const x = Math.random() * 512;
+      const y = Math.random() * 512;
+      const length = 4 + Math.random() * 22;
+      floorContext.strokeStyle = `rgba(28,31,32,${0.04 + Math.random() * 0.12})`;
+      floorContext.lineWidth = Math.random() > 0.84 ? 2 : 1;
+      floorContext.beginPath();
+      floorContext.moveTo(x, y);
+      floorContext.lineTo(x + length, y + (Math.random() - 0.5) * 5);
+      floorContext.stroke();
+    }
+    const floorTexture = new THREE.CanvasTexture(floorCanvas);
+    floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+    floorTexture.repeat.set(4, 18);
+    floorTexture.colorSpace = THREE.SRGBColorSpace;
     const concrete = new THREE.MeshStandardMaterial({
-      color: 0x454946,
-      roughness: 0.92,
-      metalness: 0.04,
+      color: 0xb2b2ad,
+      map: floorTexture,
+      roughness: 0.94,
+      metalness: 0.02,
     });
-    const darkConcrete = new THREE.MeshStandardMaterial({
-      color: 0x242a29,
-      roughness: 0.95,
+    const leftWall = new THREE.MeshStandardMaterial({
+      color: 0x5f6262,
+      roughness: 0.96,
+    });
+    const rightWall = new THREE.MeshStandardMaterial({
+      color: 0x19232d,
+      roughness: 0.9,
+    });
+    const ceiling = new THREE.MeshStandardMaterial({
+      color: 0x07090b,
+      roughness: 0.88,
     });
     const steel = new THREE.MeshStandardMaterial({
-      color: 0x253134,
-      roughness: 0.58,
-      metalness: 0.74,
+      color: 0x252b30,
+      roughness: 0.5,
+      metalness: 0.66,
     });
     const hazard = new THREE.MeshStandardMaterial({
-      color: 0xd49a31,
-      roughness: 0.72,
-      metalness: 0.18,
+      color: 0xe5ae22,
+      roughness: 0.7,
+      metalness: 0.1,
     });
-    const sand = new THREE.MeshStandardMaterial({
-      color: 0x8a7150,
-      roughness: 1,
+    const coverMaterial = new THREE.MeshStandardMaterial({
+      color: 0x6b5b35,
+      roughness: 0.88,
+      metalness: 0.02,
+    });
+    const orange = new THREE.MeshStandardMaterial({
+      color: 0xd94c16,
+      roughness: 0.67,
+      metalness: 0.06,
     });
     const rubber = new THREE.MeshStandardMaterial({
-      color: 0x101414,
+      color: 0x080a0b,
       roughness: 0.98,
     });
-    const laneLine = new THREE.MeshBasicMaterial({ color: 0xc8a84e });
+    const whiteLight = new THREE.MeshBasicMaterial({ color: 0xe5ffff });
 
     const world = new THREE.Group();
+    const obstacleBoxes: { x: number; z: number; halfW: number; halfD: number }[] = [];
     scene.add(world);
-    box(world, [22, 0.22, 105], [0, -0.11, -36], concrete);
-    box(world, [0.45, 7, 105], [-11, 3.45, -36], darkConcrete);
-    box(world, [0.45, 7, 105], [11, 3.45, -36], darkConcrete);
-    box(world, [22, 7, 0.5], [0, 3.5, -88], darkConcrete);
+    box(world, [30, 0.22, 108], [0, -0.11, -39], concrete);
+    box(world, [0.5, 7.4, 108], [-15, 3.7, -39], leftWall);
+    box(world, [0.5, 7.4, 108], [15, 3.7, -39], rightWall);
+    box(world, [30, 7.4, 0.5], [0, 3.7, -93], rightWall);
+    box(world, [30, 0.42, 108], [0, 7.25, -39], ceiling);
 
-    for (let z = 9; z > -86; z -= 5) {
-      box(world, [0.035, 0.012, 2.2], [0, 0.015, z], laneLine);
-    }
-    for (const x of [-7.4, -3.7, 3.7, 7.4]) {
-      for (let z = 9; z > -86; z -= 4.4) {
-        box(world, [0.025, 0.012, 1.7], [x, 0.017, z], laneLine);
+    for (let z = 9; z > -91; z -= 9.5) {
+      box(world, [18, 0.055, 0.22], [0, 7.01, z], whiteLight);
+      if (Math.abs(z % 19) < 10) {
+        const light = new THREE.PointLight(0xddeeed, 13, 20, 2);
+        light.position.set(0, 6.5, z);
+        world.add(light);
       }
     }
 
-    for (let z = 8; z > -82; z -= 12) {
-      box(world, [0.42, 6.2, 0.42], [-10.55, 3.1, z], steel);
-      box(world, [0.42, 6.2, 0.42], [10.55, 3.1, z], steel);
-      box(world, [21.1, 0.35, 0.42], [0, 6.05, z], steel);
-      const strip = box(
-        world,
-        [13, 0.05, 0.32],
-        [0, 5.75, z - 0.08],
-        new THREE.MeshBasicMaterial({ color: 0xc9ecdf }),
-      );
-      strip.userData.light = true;
+    const seam = new THREE.MeshBasicMaterial({ color: 0x303435 });
+    for (let z = 8; z > -91; z -= 6) {
+      box(world, [0.025, 6.4, 0.06], [-14.72, 3.25, z], seam);
+      box(world, [0.025, 6.4, 0.06], [14.72, 3.25, z], seam);
     }
+    for (const y of [1.6, 3.2, 4.8]) {
+      box(world, [0.025, 0.035, 106], [-14.72, y, -39], seam);
+      box(world, [0.025, 0.035, 106], [14.72, y, -39], seam);
+    }
+
+    const startStrip = box(world, [29.3, 0.035, 2.2], [0, 0.03, 9.2], rubber);
+    startStrip.receiveShadow = false;
+    for (let x = -13.5; x < 14; x += 2.2) {
+      const stripe = box(world, [1.05, 0.045, 2.3], [x, 0.052, 9.2], hazard);
+      stripe.rotation.y = -0.58;
+    }
+
+    function addCover(x: number, z: number, width: number, depth: number, height: number) {
+      const cover = box(world, [width, height, depth], [x, height / 2, z], coverMaterial, true);
+      obstacleBoxes.push({ x, z, halfW: width / 2 + 0.48, halfD: depth / 2 + 0.48 });
+      const panelLine = new THREE.MeshBasicMaterial({ color: 0x3a321f });
+      for (const px of [-width / 4, width / 4]) {
+        box(world, [0.025, height + 0.01, depth + 0.015], [x + px, height / 2, z], panelLine);
+      }
+      box(world, [width + 0.015, 0.025, depth + 0.015], [x, height / 2, z], panelLine);
+      return cover;
+    }
+
+    addCover(-7.5, -6, 5.2, 3.1, 2.8);
+    addCover(5.2, -19, 5.6, 3.2, 2.45);
+    addCover(-5.3, -33, 4.2, 2.8, 2.2);
+    addCover(7.2, -48, 4.8, 3.1, 2.75);
+    addCover(0.2, -65, 6.2, 3.4, 2.55);
+
+    function addHazardBarrier(x: number, z: number) {
+      box(world, [1.75, 0.75, 0.65], [x, 0.375, z], rubber, true);
+      for (const offset of [-0.58, -0.2, 0.2, 0.58]) {
+        const stripe = box(world, [0.24, 0.82, 0.035], [x + offset, 0.4, z + 0.34], hazard);
+        stripe.rotation.z = -0.42;
+      }
+    }
+    for (const [x, z] of [
+      [-12.7, 1], [12.7, -3], [-12.7, -17], [12.7, -24],
+      [-12.7, -41], [12.7, -58], [-12.7, -72],
+    ] as const) addHazardBarrier(x, z);
+
+    for (const [x, z] of [
+      [-10, -12], [10.5, -10], [-1.8, -24], [11, -31],
+      [-10.5, -40], [2.3, -46], [-8, -57], [10, -67],
+    ] as const) {
+      box(world, [0.72, 2.35, 0.72], [x, 1.175, z], orange, true);
+    }
+
+    box(world, [2.3, 3.5, 0.28], [-14.68, 1.75, -27], steel, true);
+    box(world, [2.3, 3.5, 0.28], [14.68, 1.75, -14], steel, true);
+    box(world, [2.3, 3.5, 0.28], [14.68, 1.75, -60], steel, true);
 
     const distances = [
       ["10 M", 0],
@@ -265,54 +361,14 @@ export default function Home() {
     ] as const;
     for (const [label, z] of distances) {
       const sign = makeLabel(label);
-      sign.position.set(-8.2, 3.8, z);
+      sign.position.set(-13.75, 5.8, z);
+      sign.scale.set(3.2, 0.8, 1);
       world.add(sign);
-    }
-
-    for (let i = 0; i < 5; i++) {
-      const x = -8 + i * 4;
-      box(world, [3.25, 1.05, 1.3], [x, 0.52, 10.2], steel);
-      box(world, [3.05, 0.12, 0.95], [x, 1.11, 10.05], hazard);
-      if (i < 4) box(world, [0.16, 2.6, 3.2], [x + 1.88, 1.3, 10], steel);
-    }
-
-    for (let i = 0; i < 14; i++) {
-      const x = i % 2 ? -9.7 : 9.7;
-      const z = 5 - Math.floor(i / 2) * 11.5;
-      const tire = new THREE.Mesh(
-        new THREE.TorusGeometry(0.52, 0.19, 8, 18),
-        rubber,
-      );
-      tire.position.set(x, 0.55, z);
-      tire.rotation.x = Math.PI / 2;
-      world.add(tire);
-    }
-
-    for (let i = 0; i < 18; i++) {
-      const side = i % 2 ? -1 : 1;
-      const row = Math.floor(i / 2);
-      box(
-        world,
-        [1.25, 0.42, 0.58],
-        [side * (8.8 - (row % 2) * 0.35), 0.22 + (row % 3) * 0.38, -67 - row * 0.65],
-        sand,
-        true,
-      );
-    }
-
-    for (let i = 0; i < 9; i++) {
-      const z = -4 - i * 9.2;
-      const cone = new THREE.Mesh(
-        new THREE.ConeGeometry(0.24, 0.8, 10),
-        new THREE.MeshStandardMaterial({ color: 0xd8792a, roughness: 0.7 }),
-      );
-      cone.position.set(i % 2 ? -9.25 : 9.25, 0.4, z);
-      world.add(cone);
     }
 
     const titleSign = makeLabel("RANGE // SEVEN", "#f0bd57", "rgba(10,14,14,.96)");
     titleSign.scale.set(7.5, 1.85, 1);
-    titleSign.position.set(0, 4.5, -87.7);
+    titleSign.position.set(0, 5.0, -92.7);
     world.add(titleSign);
 
     const targetRoot = new THREE.Group();
@@ -324,38 +380,38 @@ export default function Home() {
       const group = new THREE.Group();
       group.position.set(x, 0, z);
       const standMat = new THREE.MeshStandardMaterial({
-        color: 0x5c6663,
-        roughness: 0.75,
-        metalness: 0.55,
+        color: 0xd94c16,
+        roughness: 0.7,
+        metalness: 0.08,
       });
       const targetMat = new THREE.MeshStandardMaterial({
-        color: 0x262b2b,
-        roughness: 0.78,
-        metalness: 0.16,
+        color: 0xb72d22,
+        roughness: 0.68,
+        metalness: 0.1,
         emissive: 0x000000,
       });
-      box(group, [0.1, 2.25, 0.1], [0, 1.12, 0.1], standMat);
-      box(group, [1.25, 0.16, 0.42], [0, 0.09, 0.12], standMat);
+      box(group, [0.42, 2.1, 0.36], [0, 1.05, 0.12], standMat, true);
+      box(group, [1.25, 0.18, 0.58], [0, 0.09, 0.12], steel);
+      const backboard = box(group, [1.34, 1.34, 0.2], [0, 2.16, 0], steel, true);
       const torso = new THREE.Mesh(
-        new THREE.BoxGeometry(1.1, 1.28, 0.18),
+        new THREE.BoxGeometry(0.88, 0.88, 0.12),
         targetMat.clone(),
       );
-      torso.position.set(0, 1.72, 0);
+      torso.position.set(0, 2.16, 0.16);
       torso.castShadow = true;
       const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.34, 14, 10),
-        targetMat.clone(),
+        new THREE.BoxGeometry(0.15, 0.15, 0.055),
+        new THREE.MeshBasicMaterial({ color: 0xf5fbf8 }),
       );
-      head.scale.z = 0.5;
-      head.position.set(0, 2.62, 0);
-      head.castShadow = true;
+      head.position.set(0, 2.16, 0.255);
       const ring = new THREE.Mesh(
-        new THREE.RingGeometry(0.25, 0.29, 24),
-        new THREE.MeshBasicMaterial({ color: 0xb95c3e, side: THREE.DoubleSide }),
+        new THREE.RingGeometry(0.22, 0.255, 16),
+        new THREE.MeshBasicMaterial({ color: 0x1a2024, side: THREE.DoubleSide }),
       );
-      ring.position.set(0, 1.85, 0.101);
+      ring.position.set(0, 2.16, 0.225);
       group.add(torso, head, ring);
       const id = ++targetId;
+      backboard.userData = { targetId: id, zone: "torso" };
       torso.userData = { targetId: id, zone: "torso" };
       head.userData = { targetId: id, zone: "head" };
       ring.userData = { targetId: id, zone: "bullseye" };
@@ -387,28 +443,85 @@ export default function Home() {
     function buildWeapon(index: number) {
       while (weaponRoot.children.length) weaponRoot.remove(weaponRoot.children[0]);
       const w = WEAPONS[index];
+      const profile =
+        index === 1
+          ? { receiver: 0.72, handguard: 0.58, barrel: 0.46, stock: 0.46 }
+          : index === 2
+            ? { receiver: 1.02, handguard: 1.08, barrel: 1.05, stock: 0.78 }
+            : { receiver: 0.9, handguard: 0.9, barrel: 0.72, stock: 0.68 };
       const gunmetal = new THREE.MeshStandardMaterial({
-        color: 0x1c2426,
-        roughness: 0.42,
-        metalness: 0.78,
+        color: 0x20272d,
+        roughness: 0.36,
+        metalness: 0.74,
       });
       const accent = new THREE.MeshStandardMaterial({
         color: w.color,
-        roughness: 0.62,
-        metalness: 0.35,
+        roughness: 0.57,
+        metalness: 0.32,
       });
-      weaponRoot.position.set(0.34, -0.28, -0.58);
-      box(weaponRoot, [0.2, 0.25, 0.55], [0.04, -0.19, 0.08], accent, true);
-      box(weaponRoot, [0.33, 0.25, 0.82], [0, 0, -0.12], gunmetal, true);
-      box(weaponRoot, [0.25, 0.18, 0.86], [0, 0.04, -0.82], accent, true);
-      box(weaponRoot, [0.09, 0.09, 0.78], [0, 0.04, -1.58], gunmetal, true);
-      box(weaponRoot, [0.05, 0.12, 0.22], [0, 0.2, -0.66], gunmetal, true);
-      box(weaponRoot, [0.04, 0.1, 0.16], [0, 0.2, -1.22], gunmetal, true);
-      const grip = box(weaponRoot, [0.22, 0.62, 0.28], [0, -0.42, -0.16], gunmetal, true);
+      const skin = new THREE.MeshStandardMaterial({
+        color: 0xb98262,
+        roughness: 0.78,
+      });
+      const sleeve = new THREE.MeshStandardMaterial({
+        color: 0x45503c,
+        roughness: 0.9,
+      });
+      weaponRoot.position.set(0.48, -0.42, -0.7);
+      weaponRoot.scale.setScalar(index === 1 ? 1.02 : 1.08);
+      box(weaponRoot, [0.38, 0.32, profile.receiver], [0, 0, -0.18], gunmetal, true);
+      box(weaponRoot, [0.31, 0.24, profile.handguard], [0, 0.025, -0.98], accent, true);
+      box(weaponRoot, [0.11, 0.11, profile.barrel], [0, 0.03, -1.66], gunmetal, true);
+      box(weaponRoot, [0.34, 0.24, profile.stock], [0, -0.015, 0.53], accent, true);
+      box(weaponRoot, [0.28, 0.08, 1.32], [0, 0.205, -0.52], gunmetal, true);
+      for (const railZ of [-0.62, -0.82, -1.02, -1.22]) {
+        box(weaponRoot, [0.34, 0.055, 0.08], [0, 0.22, railZ], gunmetal);
+      }
+      const grip = box(weaponRoot, [0.24, 0.64, 0.3], [0, -0.42, -0.04], gunmetal, true);
       grip.rotation.x = -0.22;
-      const mag = box(weaponRoot, [0.22, 0.6, 0.32], [0, -0.43, -0.55], accent, true);
+      const mag = box(
+        weaponRoot,
+        [index === 1 ? 0.22 : 0.27, index === 1 ? 0.72 : 0.62, 0.34],
+        [0, -0.43, -0.44],
+        accent,
+        true,
+      );
       mag.rotation.x = -0.12;
-      muzzle.position.set(0, 0.04, -2.05);
+
+      const rightHand = box(weaponRoot, [0.3, 0.34, 0.32], [0.08, -0.42, 0.0], skin, true);
+      rightHand.rotation.x = -0.2;
+      const rightArm = box(weaponRoot, [0.46, 0.42, 1.05], [0.32, -0.66, 0.42], sleeve, true);
+      rightArm.rotation.x = -0.34;
+      rightArm.rotation.z = -0.12;
+      box(weaponRoot, [0.31, 0.28, 0.36], [-0.04, -0.2, -1.02], skin, true);
+      const leftArm = box(weaponRoot, [0.42, 0.38, 1.2], [-0.28, -0.52, -0.54], sleeve, true);
+      leftArm.rotation.x = -0.64;
+      leftArm.rotation.z = 0.15;
+
+      if (index === 2) {
+        const scope = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.15, 0.18, 0.68, 12),
+          gunmetal,
+        );
+        scope.rotation.x = Math.PI / 2;
+        scope.position.set(0, 0.39, -0.42);
+        weaponRoot.add(scope);
+        box(weaponRoot, [0.22, 0.16, 0.1], [0, 0.26, -0.35], gunmetal);
+      } else {
+        box(weaponRoot, [0.28, 0.08, 0.25], [0, 0.31, -0.36], gunmetal);
+        box(weaponRoot, [0.055, 0.24, 0.055], [-0.12, 0.4, -0.48], gunmetal);
+        box(weaponRoot, [0.055, 0.24, 0.055], [0.12, 0.4, -0.48], gunmetal);
+        box(weaponRoot, [0.29, 0.055, 0.055], [0, 0.51, -0.48], gunmetal);
+        box(
+          weaponRoot,
+          [0.038, 0.038, 0.02],
+          [0, 0.405, -0.515],
+          new THREE.MeshBasicMaterial({ color: 0xff4b37 }),
+        );
+      }
+      box(weaponRoot, [0.05, 0.22, 0.08], [0, 0.29, -1.48], gunmetal);
+
+      muzzle.position.set(0, 0.03, -1.66 - profile.barrel / 2);
       weaponRoot.add(muzzle);
       muzzleFlash = new THREE.Mesh(
         new THREE.OctahedronGeometry(0.16, 0),
@@ -509,7 +622,11 @@ export default function Home() {
     let unlocked = 1;
     let lastShot = 0;
     let firing = false;
+    let aimingLive = false;
+    let adsBlend = 0;
     let reloadingLive = false;
+    let reloadStarted = 0;
+    let walkPhase = 0;
     let recoil = 0;
     let weaponKick = 0;
     let yaw = 0;
@@ -580,7 +697,9 @@ export default function Home() {
       unlocked = 1;
       ammoLive = WEAPONS[0].ammo;
       reserveLive = WEAPONS[0].reserve;
+      aimingLive = false;
       reloadingLive = false;
+      setAiming(false);
       setReloading(false);
       setScore(0);
       setStreak(0);
@@ -591,6 +710,9 @@ export default function Home() {
       setAmmo({ mag: ammoLive, reserve: reserveLive });
       setObjective(`${LEVEL_GOALS[0]} TARGETS`);
       setGameOver(false);
+      camera.position.set(0, 1.72, 12);
+      yaw = 0;
+      pitch = -0.015;
       buildWeapon(0);
       running = true;
       spawnTimer = 0;
@@ -624,6 +746,7 @@ export default function Home() {
       )
         return;
       reloadingLive = true;
+      reloadStarted = performance.now();
       firing = false;
       setReloading(true);
       showFeed("RELOADING");
@@ -726,7 +849,10 @@ export default function Home() {
         muzzleLight.intensity = 5;
       }
       ejectShell();
-      const spread = weapon.spread * (1 + Math.min(streakLive * 0.015, 0.1));
+      const spread =
+        weapon.spread *
+        (aimingLive ? 0.42 : 1) *
+        (1 + Math.min(streakLive * 0.015, 0.1));
       aim.set(
         (Math.random() - 0.5) * spread,
         (Math.random() - 0.5) * spread,
@@ -744,7 +870,7 @@ export default function Home() {
 
     function spawnTarget() {
       if (targets.size >= Math.min(4 + Math.floor(levelLive / 2), 8)) return;
-      const lanes = [-7.3, -3.65, 0, 3.65, 7.3];
+      const lanes = [-10, -5, 0, 5, 10];
       const depths =
         levelLive < 2
           ? [0, -15]
@@ -770,18 +896,32 @@ export default function Home() {
     }
 
     function onMouseDown(event: MouseEvent) {
-      if (event.button !== 0 || !running) return;
+      if (!running) return;
       if (document.pointerLockElement !== renderer.domElement) {
         void renderer.domElement.requestPointerLock();
         return;
       }
+      if (event.button === 2) {
+        aimingLive = true;
+        setAiming(true);
+        return;
+      }
+      if (event.button !== 0) return;
       firing = true;
       shoot();
       if (!WEAPONS[currentWeapon].auto) firing = false;
     }
 
-    function onMouseUp() {
-      firing = false;
+    function onMouseUp(event: MouseEvent) {
+      if (event.button === 2) {
+        aimingLive = false;
+        setAiming(false);
+      }
+      if (event.button === 0) firing = false;
+    }
+
+    function onContextMenu(event: MouseEvent) {
+      event.preventDefault();
     }
 
     function onKeyDown(event: KeyboardEvent) {
@@ -809,6 +949,7 @@ export default function Home() {
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("keyup", onKeyUp);
     renderer.domElement.addEventListener("mousedown", onMouseDown);
+    renderer.domElement.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("resize", onResize);
 
     engineRef.current = {
@@ -817,6 +958,10 @@ export default function Home() {
       setFiring(value) {
         firing = value;
         if (value) shoot();
+      },
+      setAiming(value) {
+        aimingLive = value;
+        setAiming(value);
       },
       aimDelta(dx, dy) {
         if (!running) return;
@@ -846,6 +991,8 @@ export default function Home() {
           if (timeLive <= 0) {
             running = false;
             firing = false;
+            aimingLive = false;
+            setAiming(false);
             setGameOver(true);
             document.exitPointerLock?.();
             showFeed("SESSION COMPLETE");
@@ -867,28 +1014,70 @@ export default function Home() {
         (keys.has("KeyA") ? 1 : 0) +
         mobileMove.x;
       if (running) {
-        camera.position.x = THREE.MathUtils.clamp(
-          camera.position.x + strafe * dt * 4.4,
-          -7.9,
-          7.9,
-        );
-        camera.position.z = THREE.MathUtils.clamp(
-          camera.position.z - forward * dt * 3.5,
-          7.8,
-          13.2,
-        );
+        const magnitude = Math.min(1, Math.hypot(strafe, forward));
+        const normalizedStrafe = magnitude ? strafe / Math.max(1, Math.hypot(strafe, forward)) : 0;
+        const normalizedForward = magnitude ? forward / Math.max(1, Math.hypot(strafe, forward)) : 0;
+        const moveSpeed = aimingLive ? 3.2 : 5.25;
+        const moveX =
+          (Math.cos(yaw) * normalizedStrafe - Math.sin(yaw) * normalizedForward) *
+          dt *
+          moveSpeed;
+        const moveZ =
+          (-Math.sin(yaw) * normalizedStrafe - Math.cos(yaw) * normalizedForward) *
+          dt *
+          moveSpeed;
+        const canMoveTo = (x: number, z: number) =>
+          x > -14.1 &&
+          x < 14.1 &&
+          z > -88.5 &&
+          z < 12.9 &&
+          !obstacleBoxes.some(
+            (obstacle) =>
+              Math.abs(x - obstacle.x) < obstacle.halfW &&
+              Math.abs(z - obstacle.z) < obstacle.halfD,
+          );
+        if (canMoveTo(camera.position.x + moveX, camera.position.z)) {
+          camera.position.x += moveX;
+        }
+        if (canMoveTo(camera.position.x, camera.position.z + moveZ)) {
+          camera.position.z += moveZ;
+        }
+        if (magnitude > 0.05) walkPhase += dt * (aimingLive ? 7 : 10);
+        camera.position.y = 1.72 + Math.sin(walkPhase) * 0.028 * magnitude;
       }
 
       recoil = THREE.MathUtils.lerp(recoil, 0, 1 - Math.pow(0.0001, dt));
       camera.rotation.y = yaw;
       camera.rotation.x = pitch + recoil;
+      adsBlend = THREE.MathUtils.lerp(
+        adsBlend,
+        aimingLive && !reloadingLive ? 1 : 0,
+        1 - Math.pow(0.000003, dt),
+      );
+      const targetFov = aimingLive ? (currentWeapon === 2 ? 47 : 55) : 68;
+      camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 1 - Math.pow(0.00002, dt));
+      camera.updateProjectionMatrix();
       weaponKick = THREE.MathUtils.lerp(weaponKick, 0, 1 - Math.pow(0.00004, dt));
-      weaponRoot.position.z = -0.58 + weaponKick * 0.095;
+      weaponRoot.position.x = THREE.MathUtils.lerp(0.48, 0, adsBlend);
+      weaponRoot.position.z =
+        THREE.MathUtils.lerp(-0.7, -0.84, adsBlend) + weaponKick * 0.11;
       weaponRoot.position.y =
-        -0.28 -
-        weaponKick * 0.045 +
-        Math.sin(elapsed * 0.0028) * (running ? 0.004 : 0.009);
-      weaponRoot.rotation.z = Math.sin(elapsed * 0.002) * 0.005;
+        THREE.MathUtils.lerp(-0.42, currentWeapon === 2 ? -0.4 : -0.435, adsBlend) -
+        weaponKick * 0.05 +
+        Math.sin(walkPhase) * 0.012 * (1 - adsBlend);
+      if (reloadingLive) {
+        const reloadProgress = Math.min(
+          1,
+          (elapsed - reloadStarted) / WEAPONS[currentWeapon].reloadMs,
+        );
+        weaponRoot.rotation.z = -Math.sin(reloadProgress * Math.PI) * 0.48;
+        weaponRoot.rotation.x = Math.sin(reloadProgress * Math.PI) * 0.18;
+        weaponRoot.position.y -= Math.sin(reloadProgress * Math.PI) * 0.22;
+      } else {
+        weaponRoot.rotation.z =
+          Math.sin(walkPhase * 0.5) * 0.012 * (1 - adsBlend);
+        weaponRoot.rotation.x = 0;
+      }
 
       if (muzzleFlash && muzzleLight) {
         const mat = muzzleFlash.material as THREE.MeshBasicMaterial;
@@ -968,6 +1157,7 @@ export default function Home() {
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("keyup", onKeyUp);
       renderer.domElement.removeEventListener("mousedown", onMouseDown);
+      renderer.domElement.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("resize", onResize);
       renderer.dispose();
       void audio.close();
@@ -1080,7 +1270,7 @@ export default function Home() {
         <i />
         <i />
       </div>
-      <div className="crosshair" aria-hidden="true">
+      <div className={`crosshair ${aiming ? "aiming" : ""}`} aria-hidden="true">
         <i />
         <i />
         <i />
@@ -1160,11 +1350,26 @@ export default function Home() {
             FIRE
           </button>
           <button
+            className="aim-button"
+            aria-label="Aim down sights"
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              engineRef.current?.setAiming(true);
+            }}
+            onPointerUp={(event) => {
+              event.stopPropagation();
+              engineRef.current?.setAiming(false);
+            }}
+            onPointerCancel={() => engineRef.current?.setAiming(false)}
+          >
+            ADS
+          </button>
+          <button
             className="touch-reload"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => engineRef.current?.reload()}
           >
-            ↻
+            R
           </button>
         </div>
       )}

@@ -256,6 +256,15 @@ button {
   pointer-events: none;
 }
 
+.crosshair {
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.crosshair.aiming {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(.45);
+}
+
 .crosshair i,
 .hitmarker i {
   position: absolute;
@@ -784,7 +793,7 @@ button {
 
 .touch-reload {
   position: absolute;
-  right: 117px;
+  right: 166px;
   bottom: 34px;
   width: 43px;
   height: 43px;
@@ -793,6 +802,26 @@ button {
   color: var(--ink);
   background: rgba(5,8,8,.62);
   font-size: 20px;
+}
+
+.aim-button {
+  position: absolute;
+  right: 116px;
+  bottom: 87px;
+  width: 54px;
+  height: 54px;
+  border: 1px solid rgba(255,255,255,.38);
+  border-radius: 50%;
+  color: var(--ink);
+  background: rgba(5,8,8,.68);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.aim-button:active {
+  border-color: var(--amber);
+  color: var(--amber-bright);
 }
 
 @media (max-width: 700px) {
