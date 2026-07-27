@@ -53,6 +53,10 @@ bundle. YouTube pause/resume events control the simulation, rendering, input,
 animations, timers, and Web Audio lifecycle. YouTube's audio setting is the
 master audio authority, and build assets use package-safe relative paths.
 
+Player profile data and active drill checkpoints use YouTube Playables cloud
+saves exclusively. The game does not use local storage, IndexedDB, cookies, or
+another browser persistence fallback.
+
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fahmeddcodd%2Frange-seven)
 
 ## Technology

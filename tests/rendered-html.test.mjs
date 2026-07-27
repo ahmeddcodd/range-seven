@@ -80,7 +80,23 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /masterAudioGain/);
   assert.match(source, /gameNow\(\)/);
   assert.match(source, /gameTimeout\(/);
-  assert.doesNotMatch(source, /document\.visibilityState|visibilitychange/);
+  assert.doesNotMatch(
+    `${source}\n${playablesSource}`,
+    /localStorage|sessionStorage|indexedDB|document\.cookie|visibilitychange|document\.visibilityState/,
+  );
+  assert.match(source, /type RangeSevenCloudSave/);
+  assert.match(source, /version:\s*1/);
+  assert.match(source, /parseCloudSave/);
+  assert.match(source, /createCloudSave/);
+  assert.match(source, /restoreCloudSave/);
+  assert.match(source, /requestCloudSave\(true\)/);
+  assert.match(playablesSource, /loadData:\s*\(\) => Promise<string>/);
+  assert.match(playablesSource, /saveData:\s*\(data: string\) => Promise<void>/);
+  assert.match(playablesSource, /await this\.cloudLoadPromise/);
+  assert.match(playablesSource, /cloudLoadSucceeded/);
+  assert.match(playablesSource, /64 \* 1024/);
+  assert.match(playablesSource, /isWellFormed/);
+  assert.match(playablesSource, /markCloudRestoreApplied/);
   assert.match(playablesSource, /isAudioEnabled\(\)/);
   assert.match(playablesSource, /onAudioEnabledChange/);
   assert.match(playablesSource, /onPause/);

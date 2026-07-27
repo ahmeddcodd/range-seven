@@ -27,6 +27,52 @@ type Weapon = {
 type DifficultyKey = "recruit" | "operator" | "elite";
 type PerkKey = "ammo" | "ghost" | "heal";
 
+type CloudProfile = {
+  bestScore: number;
+  bestStreak: number;
+  highestDrill: number;
+  completedRuns: number;
+  difficulty: DifficultyKey;
+};
+
+type CloudSession = {
+  level: number;
+  levelKills: number;
+  score: number;
+  streak: number;
+  bestStreak: number;
+  combo: number;
+  shots: number;
+  hits: number;
+  time: number;
+  health: number;
+  ammo: number;
+  reserve: number;
+  weapon: number;
+  unlocked: number;
+  perks: Record<PerkKey, number>;
+  perkSelectionPending: boolean;
+  ghostActive: boolean;
+  cameraX: number;
+  cameraZ: number;
+  yaw: number;
+  pitch: number;
+};
+
+type RangeSevenCloudSave = {
+  version: 1;
+  profile: CloudProfile;
+  session: CloudSession | null;
+};
+
+const DEFAULT_CLOUD_PROFILE: CloudProfile = {
+  bestScore: 0,
+  bestStreak: 0,
+  highestDrill: 1,
+  completedRuns: 0,
+  difficulty: "operator",
+};
+
 const PERKS: Record<
   PerkKey,
   { label: string; status: string }
@@ -397,6 +443,8 @@ const engineRef: {
     aimDelta: (dx: number, dy: number) => void;
     switchWeapon: (index: number) => void;
     choosePerk: (perk: PerkKey) => void;
+    createCloudSave: () => RangeSevenCloudSave;
+    restoreCloudSave: (save: RangeSevenCloudSave) => void;
     pauseFromYouTube: () => void;
     resumeFromYouTube: () => void;
     setYouTubeAudioEnabled: (enabled: boolean) => void;
@@ -427,6 +475,8 @@ let isMobile = false;
 let interfaceLocked = false;
 let mobileAutoMoving = false;
 let youtubePaused = youtubePlayables.isPaused;
+let cloudProfile = { ...DEFAULT_CLOUD_PROFILE };
+let cloudSaveTimer: number | null = null;
 
 const difficultyRef: { current: DifficultyKey } = { current: difficulty };
 const hapticsRef = { current: true };
@@ -435,6 +485,116 @@ const lookLast = { current: { x: 0, y: 0 } };
 const feedTimer = {
   current: null as number | null,
 };
+
+function parseCloudSave(serialized: string | null): RangeSevenCloudSave | null {
+  if (!serialized) return null;
+  try {
+    const raw = JSON.parse(serialized) as Partial<RangeSevenCloudSave>;
+    if (!raw || raw.version !== 1 || !raw.profile) return null;
+    const validDifficulty = ["recruit", "operator", "elite"].includes(
+      raw.profile.difficulty,
+    )
+      ? raw.profile.difficulty
+      : "operator";
+    const number = (value: unknown, fallback: number, min: number, max: number) =>
+      typeof value === "number" && Number.isFinite(value)
+        ? THREE.MathUtils.clamp(value, min, max)
+        : fallback;
+    const profile: CloudProfile = {
+      bestScore: Math.round(number(raw.profile.bestScore, 0, 0, 999999999)),
+      bestStreak: Math.round(number(raw.profile.bestStreak, 0, 0, 999999)),
+      highestDrill: Math.round(
+        number(raw.profile.highestDrill, 1, 1, LEVELS.length),
+      ),
+      completedRuns: Math.round(
+        number(raw.profile.completedRuns, 0, 0, 999999),
+      ),
+      difficulty: validDifficulty as DifficultyKey,
+    };
+    const rawSession = raw.session as Partial<CloudSession> | null | undefined;
+    if (!rawSession) return { version: 1, profile, session: null };
+    const levelValue = Math.round(
+      number(rawSession.level, 1, 1, LEVELS.length),
+    );
+    const weaponValue = Math.round(
+      number(rawSession.weapon, 0, 0, WEAPONS.length - 1),
+    );
+    const unlockedValue = Math.round(
+      number(rawSession.unlocked, 1, 1, WEAPONS.length),
+    );
+    const perkPending = Boolean(rawSession.perkSelectionPending);
+    const session: CloudSession = {
+      level: levelValue,
+      levelKills: Math.round(
+        number(
+          rawSession.levelKills,
+          0,
+          0,
+          Math.max(
+            0,
+            levelConfig(levelValue).goal - (perkPending ? 0 : 1),
+          ),
+        ),
+      ),
+      score: Math.round(number(rawSession.score, 0, 0, 999999999)),
+      streak: Math.round(number(rawSession.streak, 0, 0, 999999)),
+      bestStreak: Math.round(number(rawSession.bestStreak, 0, 0, 999999)),
+      combo: Math.round(number(rawSession.combo, 1, 1, 5)),
+      shots: Math.round(number(rawSession.shots, 0, 0, 999999999)),
+      hits: Math.round(number(rawSession.hits, 0, 0, 999999999)),
+      time: number(
+        rawSession.time,
+        DIFFICULTIES[validDifficulty as DifficultyKey].startTime,
+        1,
+        9999,
+      ),
+      health: number(rawSession.health, 100, 1, 100),
+      ammo: Math.round(
+        number(rawSession.ammo, WEAPONS[weaponValue].ammo, 0, 9999),
+      ),
+      reserve: Math.round(number(rawSession.reserve, 120, 0, 99999)),
+      weapon: Math.min(weaponValue, unlockedValue - 1),
+      unlocked: unlockedValue,
+      perks: {
+        ammo: Math.round(number(rawSession.perks?.ammo, 0, 0, 99)),
+        ghost: Math.round(number(rawSession.perks?.ghost, 0, 0, 99)),
+        heal: Math.round(number(rawSession.perks?.heal, 0, 0, 99)),
+      },
+      perkSelectionPending: perkPending,
+      ghostActive: Boolean(rawSession.ghostActive),
+      cameraX: number(rawSession.cameraX, 0, -12.5, 12.5),
+      cameraZ: number(rawSession.cameraZ, 12, -86, 14),
+      yaw: number(rawSession.yaw, 0, -Math.PI * 8, Math.PI * 8),
+      pitch: number(rawSession.pitch, -0.015, -0.62, 0.62),
+    };
+    return { version: 1, profile, session };
+  } catch {
+    return null;
+  }
+}
+
+async function flushCloudSave() {
+  if (!youtubePlayables.isInPlayablesEnvironment) return;
+  const save = engineRef.current?.createCloudSave();
+  if (!save) return;
+  await youtubePlayables.saveCloudData(JSON.stringify(save));
+}
+
+function requestCloudSave(immediate = false) {
+  if (!youtubePlayables.isInPlayablesEnvironment) return;
+  if (cloudSaveTimer !== null) {
+    clearGameTimeout(cloudSaveTimer);
+    cloudSaveTimer = null;
+  }
+  if (immediate) {
+    void flushCloudSave();
+    return;
+  }
+  cloudSaveTimer = gameTimeout(() => {
+    cloudSaveTimer = null;
+    void flushCloudSave();
+  }, 650);
+}
 
 function replayClass(target: HTMLElement, className: string) {
   target.className = "";
@@ -509,12 +669,14 @@ function setGameOver(update: Updater<boolean>) {
   if (gameOver) {
     setMobileAutoMoving(false);
     updateResults();
+    requestCloudSave(true);
   }
   updateTouchLayer();
 }
 
 function setScore(update: Updater<number>) {
   score = resolveUpdate(score, update);
+  cloudProfile.bestScore = Math.max(cloudProfile.bestScore, score);
   element("score-value").textContent = score
     .toLocaleString("en-US")
     .padStart(6, "0");
@@ -522,6 +684,7 @@ function setScore(update: Updater<number>) {
 
 function setLevel(update: Updater<number>) {
   level = resolveUpdate(level, update);
+  cloudProfile.highestDrill = Math.max(cloudProfile.highestDrill, level);
   element("level-value").textContent = String(level).padStart(2, "0");
   updateWeaponRail();
 }
@@ -536,6 +699,7 @@ function setStreak(update: Updater<number>) {
 
 function setBestStreak(update: Updater<number>) {
   bestStreak = resolveUpdate(bestStreak, update);
+  cloudProfile.bestStreak = Math.max(cloudProfile.bestStreak, bestStreak);
 }
 
 function setCombo(update: Updater<number>) {
@@ -653,6 +817,7 @@ const onPointerModeChange = (event: MediaQueryListEvent) =>
 setIsMobile(coarsePointerQuery.matches);
 coarsePointerQuery.addEventListener("change", onPointerModeChange);
 const removeYouTubePauseListener = youtubePlayables.onPause(() => {
+  requestCloudSave(true);
   youtubePaused = true;
   lookPointer.current = null;
   updateTouchLayer();
@@ -1866,6 +2031,7 @@ const mount = element<HTMLDivElement>("viewport");
       ghost: 0,
       heal: 0,
     };
+    let pendingCloudSession: CloudSession | null = null;
 
     function tryPointerLock() {
       if (
@@ -2004,6 +2170,7 @@ const mount = element<HTMLDivElement>("viewport");
           unlocked > previousUnlocked ? "WEAPON UNLOCKED" : "EQUIPPED"
         }`,
       );
+      requestCloudSave(true);
       announceDrillStart();
     }
 
@@ -2225,7 +2392,129 @@ const mount = element<HTMLDivElement>("viewport");
       renderPerkStatus();
       showFeed("BLACKSITE LIVE");
       initAudio();
+      requestCloudSave();
       announceDrillStart();
+    }
+
+    function restoreCloudSession(session: CloudSession) {
+      targets.forEach((target) => targetRoot.remove(target.group));
+      targets.clear();
+      levelLive = session.level;
+      levelKills = session.levelKills;
+      scoreLive = session.score;
+      streakLive = session.streak;
+      comboLive = session.combo;
+      lastKillAt = 0;
+      shotsLive = session.shots;
+      hitsLive = Math.min(session.hits, session.shots);
+      timeLive = session.time;
+      playerHealthLive = session.health;
+      timeAccumulator = 0;
+      currentWeapon = Math.min(session.weapon, session.unlocked - 1);
+      unlocked = session.unlocked;
+      ammoLive = session.ammo;
+      reserveLive = session.reserve;
+      perkSelectionPending = session.perkSelectionPending;
+      ghostActive = session.ghostActive;
+      perkCounts.ammo = session.perks.ammo;
+      perkCounts.ghost = session.perks.ghost;
+      perkCounts.heal = session.perks.heal;
+      drillTransitionToken++;
+      mobileAdvanceRequested = false;
+      mobilePathSide = levelLive % 2 === 0 ? -1 : 1;
+      setMobileAutoMoving(false);
+      aimingLive = false;
+      reloadingLive = false;
+      reloadToken++;
+      setAiming(false);
+      setReloading(false);
+      setScore(scoreLive);
+      setStreak(streakLive);
+      setBestStreak(Math.max(session.bestStreak, streakLive));
+      setCombo(comboLive);
+      setAccuracy(
+        shotsLive > 0 ? Math.round((hitsLive / shotsLive) * 100) : 100,
+      );
+      setHealth(playerHealthLive);
+      setLevel(levelLive);
+      setTime(Math.ceil(timeLive));
+      setWeaponIndex(currentWeapon);
+      setAmmo({ mag: ammoLive, reserve: reserveLive });
+      setObjective(levelObjective(levelLive));
+      setGameOver(false);
+      camera.position.set(session.cameraX, 1.72, session.cameraZ);
+      yaw = session.yaw;
+      pitch = session.pitch;
+      buildWeapon(currentWeapon);
+      squadDeployed = false;
+      running = false;
+      element<HTMLElement>("perk-screen").hidden = true;
+      element<HTMLElement>("drill-announcement").hidden = true;
+      renderPerkStatus();
+      initAudio();
+      if (perkSelectionPending) {
+        showPerkSelection();
+      } else {
+        showFeed("CLOUD CHECKPOINT RESTORED");
+        announceDrillStart();
+      }
+    }
+
+    function createCloudSave(): RangeSevenCloudSave {
+      cloudProfile.difficulty = difficultyRef.current;
+      cloudProfile.bestScore = Math.max(cloudProfile.bestScore, scoreLive);
+      cloudProfile.bestStreak = Math.max(
+        cloudProfile.bestStreak,
+        bestStreak,
+        streakLive,
+      );
+      cloudProfile.highestDrill = Math.max(
+        cloudProfile.highestDrill,
+        levelLive,
+      );
+      return {
+        version: 1,
+        profile: { ...cloudProfile },
+        session:
+          started && !gameOver
+            ? {
+                level: levelLive,
+                levelKills,
+                score: scoreLive,
+                streak: streakLive,
+                bestStreak: Math.max(bestStreak, streakLive),
+                combo: comboLive,
+                shots: shotsLive,
+                hits: hitsLive,
+                time: timeLive,
+                health: playerHealthLive,
+                ammo: ammoLive,
+                reserve: reserveLive,
+                weapon: currentWeapon,
+                unlocked,
+                perks: { ...perkCounts },
+                perkSelectionPending,
+                ghostActive,
+                cameraX: camera.position.x,
+                cameraZ: camera.position.z,
+                yaw,
+                pitch,
+              }
+            : null,
+      };
+    }
+
+    function restoreCloudSave(save: RangeSevenCloudSave) {
+      cloudProfile = { ...save.profile };
+      setDifficulty(save.profile.difficulty);
+      pendingCloudSession = save.session;
+      const deployButton = element<HTMLButtonElement>("deploy-button");
+      const deployLabel = deployButton.querySelector("span");
+      if (deployLabel) {
+        deployLabel.textContent = pendingCloudSession
+          ? `CONTINUE DRILL ${String(pendingCloudSession.level).padStart(2, "0")}`
+          : "ENTER BLACKSITE";
+      }
     }
 
     function switchWeapon(index: number) {
@@ -2239,6 +2528,7 @@ const mount = element<HTMLDivElement>("viewport");
       buildWeapon(index);
       tone(240, 0.08, 0.05);
       showFeed(`${WEAPONS[index].name} READY`);
+      requestCloudSave();
     }
 
     function reload() {
@@ -2293,6 +2583,7 @@ const mount = element<HTMLDivElement>("viewport");
           importedIdleAction?.reset().fadeIn(0.08).play();
         }
         tone(560, 0.055, 0.045);
+        requestCloudSave();
       }, weapon.reloadMs);
     }
 
@@ -2304,6 +2595,7 @@ const mount = element<HTMLDivElement>("viewport");
         setAiming(false);
         setInterfaceLocked(true);
         setObjective("BLACKSITE CLEARED");
+        cloudProfile.completedRuns++;
         setGameOver(true);
         document.exitPointerLock?.();
         tone(660, 0.18, 0.12);
@@ -2320,6 +2612,7 @@ const mount = element<HTMLDivElement>("viewport");
       tone(520, 0.18, 0.11);
       gameTimeout(() => tone(780, 0.24, 0.1), 120);
       showPerkSelection();
+      requestCloudSave(true);
     }
 
     function registerHit(hit: THREE.Intersection<THREE.Object3D>) {
@@ -2400,6 +2693,7 @@ const mount = element<HTMLDivElement>("viewport");
         setStreak(streakLive);
         setCombo(comboLive);
         setBestStreak((best) => Math.max(best, streakLive));
+        requestCloudSave();
         showFeed(
           `${zone === "head" ? "HEADSHOT" : zone === "bullseye" ? "CORE HIT" : "TARGET DOWN"}  +${points}${
             precisionTime ? "  +TIME" : ""
@@ -2503,7 +2797,7 @@ const mount = element<HTMLDivElement>("viewport");
           Math.min(Math.max(levelLive - 1, 0), LEVEL_ENCOUNTERS.length - 1)
         ];
       squadDeployed = true;
-      encounter.forEach((slot, index) => {
+      encounter.slice(Math.min(levelKills, encounter.length)).forEach((slot, index) => {
         createTarget(slot.x, slot.z, slot.motion, index * 115);
       });
       setObjective(levelObjective(levelLive));
@@ -2744,7 +3038,15 @@ const mount = element<HTMLDivElement>("viewport");
     let frame: number | null = null;
 
     engineRef.current = {
-      start: resetGame,
+      start() {
+        if (pendingCloudSession) {
+          const session = pendingCloudSession;
+          pendingCloudSession = null;
+          restoreCloudSession(session);
+        } else {
+          resetGame();
+        }
+      },
       reload,
       setFiring(value) {
         if (youtubePaused) return;
@@ -2764,6 +3066,8 @@ const mount = element<HTMLDivElement>("viewport");
       },
       switchWeapon,
       choosePerk,
+      createCloudSave,
+      restoreCloudSave,
       pauseFromYouTube() {
         firing = false;
         aimingLive = false;
@@ -3280,6 +3584,7 @@ const mount = element<HTMLDivElement>("viewport");
       removeYouTubePauseListener();
       removeYouTubeResumeListener();
       removeYouTubeAudioListener();
+      if (cloudSaveTimer !== null) clearGameTimeout(cloudSaveTimer);
       youtubePlayables.destroy();
       renderer.dispose();
       void audio.close();
@@ -3332,6 +3637,7 @@ const mount = element<HTMLDivElement>("viewport");
         const key = button.dataset.difficulty as DifficultyKey;
         setDifficulty(key);
         setTime(DIFFICULTIES[key].startTime);
+        requestCloudSave();
       });
     });
   document
@@ -3350,6 +3656,7 @@ const mount = element<HTMLDivElement>("viewport");
     setInterfaceLocked(false);
     element<HTMLElement>("perk-screen").hidden = true;
     element<HTMLElement>("drill-announcement").hidden = true;
+    requestCloudSave(true);
   });
 
   const touchLayer = element<HTMLDivElement>("touch-layer");
@@ -3361,6 +3668,13 @@ const mount = element<HTMLDivElement>("viewport");
 
   updateWeaponRail();
   setFeed(feed);
+  void youtubePlayables
+    .getCloudData()
+    .then((serialized) => {
+      const save = parseCloudSave(serialized);
+      if (save) engineRef.current?.restoreCloudSave(save);
+    })
+    .finally(() => youtubePlayables.markCloudRestoreApplied());
   startLoop();
 
 /*

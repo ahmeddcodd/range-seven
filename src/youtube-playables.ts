@@ -7,6 +7,8 @@ type YouTubePlayablesApi = {
   game: {
     firstFrameReady: () => void;
     gameReady: () => void;
+    loadData: () => Promise<string>;
+    saveData: (data: string) => Promise<void>;
   };
   system: {
     isAudioEnabled: () => boolean;
@@ -59,6 +61,10 @@ class YouTubePlayablesRuntime {
   private nextTaskId = 1;
   private firstFrameSent = false;
   private gameReadySent = false;
+  private cloudRestoreApplied = false;
+  private cloudLoadSucceeded = false;
+  private readonly cloudLoadPromise: Promise<string | null>;
+  private saveChain = Promise.resolve();
   private readonly tasks = new Map<number, ScheduledTask>();
   private readonly pauseListeners = new Set<PauseListener>();
   private readonly resumeListeners = new Set<PauseListener>();
@@ -66,6 +72,8 @@ class YouTubePlayablesRuntime {
   private readonly teardownCallbacks: Array<() => void> = [];
 
   constructor() {
+    this.cloudLoadPromise = this.loadCloudDataFromYouTube();
+
     if (this.api) {
       try {
         this.youtubeAudioEnabled = this.api.IN_PLAYABLES_ENV
@@ -182,13 +190,52 @@ class YouTubePlayablesRuntime {
   }
 
   signalGameReady() {
-    if (this.gameReadySent || !this.firstFrameSent || !this.api) return;
+    if (
+      this.gameReadySent ||
+      !this.firstFrameSent ||
+      !this.cloudRestoreApplied ||
+      !this.api
+    )
+      return;
     try {
       this.api.game.gameReady();
       this.gameReadySent = true;
     } catch (error) {
       this.logError("YouTube rejected gameReady().", error);
     }
+  }
+
+  async getCloudData() {
+    return this.cloudLoadPromise;
+  }
+
+  markCloudRestoreApplied() {
+    this.cloudRestoreApplied = true;
+    this.signalGameReady();
+  }
+
+  async saveCloudData(serializedData: string) {
+    await this.cloudLoadPromise;
+    if (
+      !this.api?.IN_PLAYABLES_ENV ||
+      !this.cloudLoadSucceeded ||
+      serializedData.length > 64 * 1024 ||
+      !isWellFormed(serializedData)
+    )
+      return false;
+
+    let saved = false;
+    this.saveChain = this.saveChain
+      .catch(() => undefined)
+      .then(async () => {
+        await this.api!.game.saveData(serializedData);
+        saved = true;
+      })
+      .catch((error) => {
+        this.logWarning("YouTube cloud save failed.", error);
+      });
+    await this.saveChain;
+    return saved;
   }
 
   destroy() {
@@ -210,6 +257,22 @@ class YouTubePlayablesRuntime {
       this.tasks.delete(id);
       task.callback();
     }, task.remaining);
+  }
+
+  private async loadCloudDataFromYouTube() {
+    if (!this.api?.IN_PLAYABLES_ENV) {
+      this.cloudLoadSucceeded = false;
+      return null;
+    }
+    try {
+      const data = await this.api.game.loadData();
+      this.cloudLoadSucceeded = true;
+      return data;
+    } catch (error) {
+      this.cloudLoadSucceeded = false;
+      this.logWarning("YouTube cloud load failed.", error);
+      return null;
+    }
   }
 
   private handlePause() {
@@ -269,6 +332,20 @@ class YouTubePlayablesRuntime {
     void error;
     this.api?.health?.logWarning?.();
   }
+}
+
+function isWellFormed(value: string) {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) return false;
+      index++;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export const youtubePlayables = new YouTubePlayablesRuntime();
