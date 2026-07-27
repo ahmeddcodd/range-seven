@@ -16,8 +16,9 @@ test("builds the complete static Range Seven game shell", async () => {
 });
 
 test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
-  const [source, packageJson, viteConfig, vercelConfig] = await Promise.all([
+  const [source, styles, packageJson, viteConfig, vercelConfig] = await Promise.all([
     readFile(new URL("../src/main.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../vercel.json", import.meta.url), "utf8"),
@@ -35,6 +36,9 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /BLACKSITE FINAL/);
   assert.match(source, /const LEVEL_ENCOUNTERS/);
   assert.match(source, /function deployLevelSquad/);
+  assert.match(source, /dataset\.gameReady = "true"/);
+  assert.match(source, /function tryPointerLock/);
+  assert.match(source, /pointerLockUnavailable/);
   assert.doesNotMatch(source, /function spawnTarget/);
   assert.match(source, /run: "Run"/);
   assert.match(source, /roll: "Roll"/);
@@ -52,6 +56,7 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(packageJson, /"typescript":/);
   assert.match(packageJson, /"three":/);
   assert.doesNotMatch(packageJson, /react|next|vinext|wrangler|cloudflare|drizzle/i);
+  assert.match(styles, /\[hidden\]\s*\{[\s\S]*display:\s*none\s*!important/);
   assert.match(viteConfig, /defineConfig/);
   assert.match(vercelConfig, /"framework": "vite"/);
   assert.match(vercelConfig, /"outputDirectory": "dist"/);

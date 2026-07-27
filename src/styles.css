@@ -8,6 +8,10 @@
   --line: rgba(233, 181, 76, 0.42);
 }
 
+[hidden] {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
@@ -1073,7 +1077,7 @@ button {
     transform: scale(.72);
     transform-origin: right bottom;
     opacity: .82;
-    pointer-events: none;
+    pointer-events: auto;
   }
 
   .kill-feed {

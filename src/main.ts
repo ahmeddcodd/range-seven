@@ -1771,6 +1771,29 @@ const mount = element<HTMLDivElement>("viewport");
     let yaw = 0;
     let pitch = -0.015;
     let mobileMove = { x: 0, y: 0 };
+    let pointerLockUnavailable = false;
+
+    function tryPointerLock() {
+      if (
+        pointerLockUnavailable ||
+        matchMedia("(pointer: coarse)").matches ||
+        document.pointerLockElement === renderer.domElement
+      ) {
+        return;
+      }
+      try {
+        const lockRequest = renderer.domElement.requestPointerLock();
+        void lockRequest
+          ?.then(() => {
+            pointerLockUnavailable = false;
+          })
+          .catch(() => {
+            pointerLockUnavailable = true;
+          });
+      } catch {
+        pointerLockUnavailable = true;
+      }
+    }
 
     function burst(position: THREE.Vector3, hit = false) {
       const count = hit ? 11 : 5;
@@ -1988,9 +2011,7 @@ const mount = element<HTMLDivElement>("viewport");
         }
       }, 2200);
       initAudio();
-      if (!matchMedia("(pointer: coarse)").matches) {
-        void renderer.domElement.requestPointerLock();
-      }
+      tryPointerLock();
     }
 
     function switchWeapon(index: number) {
@@ -2301,7 +2322,8 @@ const mount = element<HTMLDivElement>("viewport");
     }
 
     function onMouseMove(event: MouseEvent) {
-      if (document.pointerLockElement !== renderer.domElement || !running) return;
+      const hasPointerLock = document.pointerLockElement === renderer.domElement;
+      if (!running || (!hasPointerLock && event.buttons === 0)) return;
       yaw -= event.movementX * 0.0018;
       pitch -= event.movementY * 0.00165;
       pitch = THREE.MathUtils.clamp(pitch, -0.62, 0.62);
@@ -2310,8 +2332,7 @@ const mount = element<HTMLDivElement>("viewport");
     function onMouseDown(event: MouseEvent) {
       if (!running) return;
       if (document.pointerLockElement !== renderer.domElement) {
-        void renderer.domElement.requestPointerLock();
-        return;
+        tryPointerLock();
       }
       if (event.button === 2) {
         aimingLive = true;
@@ -2864,8 +2885,6 @@ const mount = element<HTMLDivElement>("viewport");
       dust.rotation.y += dt * 0.0015;
       renderer.render(scene, camera);
     }
-    animate();
-
     window.addEventListener("beforeunload", () => {
       engineDisposed = true;
       reloadToken++;
@@ -3008,6 +3027,8 @@ const mount = element<HTMLDivElement>("viewport");
 
   updateWeaponRail();
   setFeed(feed);
+  document.documentElement.dataset.gameReady = "true";
+  animate();
 
 /*
   return (
