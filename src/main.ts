@@ -677,6 +677,7 @@ function setGameOver(update: Updater<boolean>) {
 function setScore(update: Updater<number>) {
   score = resolveUpdate(score, update);
   cloudProfile.bestScore = Math.max(cloudProfile.bestScore, score);
+  youtubePlayables.sendScore(cloudProfile.bestScore);
   element("score-value").textContent = score
     .toLocaleString("en-US")
     .padStart(6, "0");
@@ -3674,7 +3675,10 @@ const mount = element<HTMLDivElement>("viewport");
       const save = parseCloudSave(serialized);
       if (save) engineRef.current?.restoreCloudSave(save);
     })
-    .finally(() => youtubePlayables.markCloudRestoreApplied());
+    .finally(() => {
+      youtubePlayables.sendScore(cloudProfile.bestScore);
+      youtubePlayables.markCloudRestoreApplied();
+    });
   startLoop();
 
 /*

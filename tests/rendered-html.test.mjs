@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import test from "node:test";
+
+const SUPPORTED_BUNDLE_NAME = /^[a-zA-Z0-9._-]+$/;
+
+async function assertSupportedBundleNames(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    assert.match(
+      entry.name,
+      SUPPORTED_BUNDLE_NAME,
+      `Unsupported YouTube Playables bundle name: ${entry.name}`,
+    );
+    if (entry.isDirectory()) {
+      await assertSupportedBundleNames(new URL(`${entry.name}/`, directory));
+    }
+  }
+}
 
 test("builds the complete static Range Seven game shell", async () => {
   const html = await readFile(
@@ -97,6 +112,10 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(playablesSource, /64 \* 1024/);
   assert.match(playablesSource, /isWellFormed/);
   assert.match(playablesSource, /markCloudRestoreApplied/);
+  assert.match(playablesSource, /sendScore:\s*\(score: \{ value: number \}\)/);
+  assert.match(playablesSource, /Math\.trunc\(score\)/);
+  assert.match(playablesSource, /sendScore\(\{ value: integerScore \}\)/);
+  assert.match(source, /youtubePlayables\.sendScore\(cloudProfile\.bestScore\)/);
   assert.match(playablesSource, /isAudioEnabled\(\)/);
   assert.match(playablesSource, /onAudioEnabledChange/);
   assert.match(playablesSource, /onPause/);
@@ -136,4 +155,6 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   await access(new URL("../public/models/fps-akm.glb", import.meta.url));
   await access(new URL("../public/models/enemy-punk.glb", import.meta.url));
   await access(new URL("../public/models/enemy-glock.glb", import.meta.url));
+  await assertSupportedBundleNames(new URL("../public/", import.meta.url));
+  await assertSupportedBundleNames(new URL("../dist/", import.meta.url));
 });

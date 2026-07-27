@@ -10,6 +10,9 @@ type YouTubePlayablesApi = {
     loadData: () => Promise<string>;
     saveData: (data: string) => Promise<void>;
   };
+  engagement: {
+    sendScore: (score: { value: number }) => Promise<void>;
+  };
   system: {
     isAudioEnabled: () => boolean;
     onAudioEnabledChange: (callback: AudioListener) => () => void;
@@ -63,6 +66,7 @@ class YouTubePlayablesRuntime {
   private gameReadySent = false;
   private cloudRestoreApplied = false;
   private cloudLoadSucceeded = false;
+  private lastSubmittedScore = -1;
   private readonly cloudLoadPromise: Promise<string | null>;
   private saveChain = Promise.resolve();
   private readonly tasks = new Map<number, ScheduledTask>();
@@ -236,6 +240,19 @@ class YouTubePlayablesRuntime {
       });
     await this.saveChain;
     return saved;
+  }
+
+  sendScore(score: number) {
+    if (!this.api?.IN_PLAYABLES_ENV || !Number.isFinite(score)) return;
+    const integerScore = Math.max(
+      0,
+      Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(score)),
+    );
+    if (integerScore <= this.lastSubmittedScore) return;
+    this.lastSubmittedScore = integerScore;
+    void this.api.engagement
+      .sendScore({ value: integerScore })
+      .catch((error) => this.logWarning("YouTube score submission failed.", error));
   }
 
   destroy() {
