@@ -17,6 +17,12 @@ test("builds the complete static Range Seven game shell", async () => {
   assert.match(html, /data-perk="ammo"/);
   assert.match(html, /data-perk="ghost"/);
   assert.match(html, /data-perk="heal"/);
+  assert.match(html, /HOLD TO FIRE/);
+  assert.match(html, /id="auto-move-indicator"/);
+  assert.doesNotMatch(
+    html,
+    /id="(?:joystick|fire-button|aim-button|touch-reload|haptics-toggle)"/,
+  );
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
@@ -42,6 +48,10 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /const LEVEL_ENCOUNTERS/);
   assert.match(source, /function deployLevelSquad/);
   assert.match(source, /function advanceEnemyTowardPlayer/);
+  assert.match(source, /function advanceMobilePlayer/);
+  assert.match(source, /mobileAdvanceRequested = true/);
+  assert.match(source, /engagementDistance = 16\.5/);
+  assert.match(source, /setFiring\(true\)/);
   assert.match(source, /function announceDrillStart/);
   assert.match(source, /function showPerkSelection/);
   assert.match(source, /function choosePerk/);
@@ -69,6 +79,8 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(packageJson, /"three":/);
   assert.doesNotMatch(packageJson, /react|next|vinext|wrangler|cloudflare|drizzle/i);
   assert.match(styles, /\[hidden\]\s*\{[\s\S]*display:\s*none\s*!important/);
+  assert.match(styles, /@media \(pointer: coarse\)/);
+  assert.match(styles, /\.auto-move-indicator/);
   assert.match(viteConfig, /defineConfig/);
   assert.match(vercelConfig, /"framework": "vite"/);
   assert.match(vercelConfig, /"outputDirectory": "dist"/);

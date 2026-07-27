@@ -142,14 +142,18 @@
         </button>
       </div>
 
-      <div id="touch-layer" class="touch-layer" hidden>
-        <div id="joystick" class="joystick"><i></i></div>
-        <button id="fire-button" class="fire-button" aria-label="Fire weapon">FIRE</button>
-        <button id="aim-button" class="aim-button" aria-label="Aim down sights">ADS</button>
-        <button id="touch-reload" class="touch-reload" aria-label="Reload weapon">R</button>
-        <button id="haptics-toggle" class="haptics-toggle" aria-label="Turn haptics off" aria-pressed="true">
-          VIBE <small>ON</small>
-        </button>
+      <div
+        id="touch-layer"
+        class="touch-layer"
+        aria-label="Tap and hold to fire, then drag to steer"
+        hidden
+      >
+        <div class="touch-steer-hint" aria-hidden="true">
+          <i></i><span>HOLD TO FIRE · DRAG TO STEER</span>
+        </div>
+      </div>
+      <div id="auto-move-indicator" class="auto-move-indicator" hidden>
+        <i></i><span>AUTO ADVANCE</span><i></i>
       </div>
 
       <section id="start-screen" class="start-screen">

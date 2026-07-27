@@ -389,7 +389,6 @@ const engineRef: {
     setFiring: (value: boolean) => void;
     setAiming: (value: boolean) => void;
     aimDelta: (dx: number, dy: number) => void;
-    moveInput: (x: number, y: number) => void;
     switchWeapon: (index: number) => void;
     choosePerk: (perk: PerkKey) => void;
   } | null;
@@ -416,13 +415,11 @@ let health = 100;
 let reloading = false;
 let aiming = false;
 let isMobile = false;
-let haptics = true;
 let interfaceLocked = false;
+let mobileAutoMoving = false;
 
 const difficultyRef: { current: DifficultyKey } = { current: difficulty };
 const hapticsRef = { current: true };
-const joystickRef = { current: element<HTMLDivElement>("joystick") };
-const joyPointer = { current: null as number | null };
 const lookPointer = { current: null as number | null };
 const lookLast = { current: { x: 0, y: 0 } };
 const feedTimer = {
@@ -447,15 +444,18 @@ function updateTouchLayer() {
 function setInterfaceLocked(locked: boolean) {
   interfaceLocked = locked;
   if (locked) {
-    joyPointer.current = null;
     lookPointer.current = null;
-    joystickRef.current.style.setProperty("--jx", "0px");
-    joystickRef.current.style.setProperty("--jy", "0px");
     engineRef.current?.setFiring(false);
     engineRef.current?.setAiming(false);
-    engineRef.current?.moveInput(0, 0);
+    setMobileAutoMoving(false);
   }
   updateTouchLayer();
+}
+
+function setMobileAutoMoving(moving: boolean) {
+  if (mobileAutoMoving === moving) return;
+  mobileAutoMoving = moving;
+  element<HTMLElement>("auto-move-indicator").hidden = !(isMobile && moving);
 }
 
 function updateResults() {
@@ -495,7 +495,10 @@ function setStarted(update: Updater<boolean>) {
 function setGameOver(update: Updater<boolean>) {
   gameOver = resolveUpdate(gameOver, update);
   element("result-screen").hidden = !gameOver;
-  if (gameOver) updateResults();
+  if (gameOver) {
+    setMobileAutoMoving(false);
+    updateResults();
+  }
   updateTouchLayer();
 }
 
@@ -620,20 +623,11 @@ function setAiming(update: Updater<boolean>) {
 
 function setIsMobile(update: Updater<boolean>) {
   isMobile = resolveUpdate(isMobile, update);
-  element("aim-help").textContent = isMobile ? "DRAG RIGHT SIDE" : "MOVE MOUSE";
-  element("fire-help").textContent = isMobile ? "HOLD FIRE" : "LEFT CLICK";
-  element("move-help").textContent = isMobile ? "LEFT STICK" : "WASD KEYS";
+  element("aim-help").textContent = isMobile ? "DRAG TO STEER" : "MOVE MOUSE";
+  element("fire-help").textContent = isMobile ? "TAP + HOLD" : "LEFT CLICK";
+  element("move-help").textContent = isMobile ? "AUTO ADVANCE" : "WASD KEYS";
+  if (!isMobile) setMobileAutoMoving(false);
   updateTouchLayer();
-}
-
-function setHaptics(update: Updater<boolean>) {
-  haptics = resolveUpdate(haptics, update);
-  hapticsRef.current = haptics;
-  const button = element<HTMLButtonElement>("haptics-toggle");
-  button.setAttribute("aria-label", `Turn haptics ${haptics ? "off" : "on"}`);
-  button.setAttribute("aria-pressed", String(haptics));
-  const status = button.querySelector("small");
-  if (status) status.textContent = haptics ? "ON" : "OFF";
 }
 
 function showFeed(message: string) {
@@ -1815,7 +1809,8 @@ const mount = element<HTMLDivElement>("viewport");
     let weaponKick = 0;
     let yaw = 0;
     let pitch = -0.015;
-    let mobileMove = { x: 0, y: 0 };
+    let mobileAdvanceRequested = false;
+    let mobilePathSide = 1;
     let pointerLockUnavailable = false;
     let drillTransitionToken = 0;
     let perkSelectionPending = false;
@@ -1907,6 +1902,7 @@ const mount = element<HTMLDivElement>("viewport");
 
     function showPerkSelection() {
       perkSelectionPending = true;
+      mobileAdvanceRequested = false;
       running = false;
       firing = false;
       aimingLive = false;
@@ -1948,6 +1944,13 @@ const mount = element<HTMLDivElement>("viewport");
       setTime(Math.ceil(timeLive));
       setObjective(levelObjective(levelLive));
       setDamageFlash((value) => value + 1);
+      if (isMobile) {
+        camera.position.set(0, 1.72, 12);
+        yaw = 0;
+        pitch = -0.015;
+        mobileAdvanceRequested = false;
+        mobilePathSide = levelLive % 2 === 0 ? -1 : 1;
+      }
       tone(560, 0.11, 0.08);
       setTimeout(() => tone(860, 0.16, 0.075), 105);
       showFeed(
@@ -2145,6 +2148,9 @@ const mount = element<HTMLDivElement>("viewport");
       perkCounts.ammo = 0;
       perkCounts.ghost = 0;
       perkCounts.heal = 0;
+      mobileAdvanceRequested = false;
+      mobilePathSide = 1;
+      setMobileAutoMoving(false);
       aimingLive = false;
       reloadingLive = false;
       reloadToken++;
@@ -2311,6 +2317,7 @@ const mount = element<HTMLDivElement>("viewport");
         }
         streakLive++;
         levelKills++;
+        if (isMobile) mobileAdvanceRequested = true;
         comboLive =
           lastKillAt > 0 && killTime - lastKillAt < 1650
             ? Math.min(5, comboLive + 1)
@@ -2527,6 +2534,98 @@ const mount = element<HTMLDivElement>("viewport");
       return { moved: false, directionX: 0, directionZ: 0, arrived: false };
     }
 
+    function canPlayerMoveTo(x: number, z: number) {
+      return (
+        x > -14.1 &&
+        x < 14.1 &&
+        z > -88.5 &&
+        z < 12.9 &&
+        !obstacleBoxes.some(
+          (obstacle) =>
+            Math.abs(x - obstacle.x) < obstacle.halfW &&
+            Math.abs(z - obstacle.z) < obstacle.halfD,
+        )
+      );
+    }
+
+    function advanceMobilePlayer(dt: number) {
+      if (!isMobile || !running || !mobileAdvanceRequested) {
+        setMobileAutoMoving(false);
+        return false;
+      }
+
+      const livingTargets = Array.from(targets.values()).filter(
+        (target) =>
+          !target.dead &&
+          performance.now() - target.bornAt >= 420,
+      );
+      if (livingTargets.length === 0) {
+        mobileAdvanceRequested = false;
+        setMobileAutoMoving(false);
+        return false;
+      }
+
+      let nearest = livingTargets[0];
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const target of livingTargets) {
+        const distance = Math.hypot(
+          target.group.position.x - camera.position.x,
+          target.group.position.z - camera.position.z,
+        );
+        if (distance < nearestDistance) {
+          nearest = target;
+          nearestDistance = distance;
+        }
+      }
+
+      const engagementDistance = 16.5;
+      const forwardDistance = nearest.group.position.z - camera.position.z;
+      if (nearestDistance <= engagementDistance || forwardDistance > -2) {
+        mobileAdvanceRequested = false;
+        setMobileAutoMoving(false);
+        return false;
+      }
+
+      const laneX = THREE.MathUtils.clamp(
+        nearest.group.position.x * 0.28,
+        -4.2,
+        4.2,
+      );
+      const toLaneX = laneX - camera.position.x;
+      const toEnemyZ = nearest.group.position.z - camera.position.z;
+      const desiredAngle = Math.atan2(toLaneX, toEnemyZ);
+      const offsets = [
+        0,
+        mobilePathSide * 0.42,
+        mobilePathSide * -0.42,
+        mobilePathSide * 0.82,
+        mobilePathSide * -0.82,
+      ];
+      const step = Math.min(
+        (3.55 + levelLive * 0.16) * dt,
+        Math.max(0, nearestDistance - engagementDistance),
+      );
+
+      for (const offset of offsets) {
+        const angle = desiredAngle + offset;
+        const directionX = Math.sin(angle);
+        const directionZ = Math.cos(angle);
+        if (directionZ > -0.08) continue;
+        const nextX = camera.position.x + directionX * step;
+        const nextZ = camera.position.z + directionZ * step;
+        if (!canPlayerMoveTo(nextX, nextZ)) continue;
+        camera.position.x = nextX;
+        camera.position.z = nextZ;
+        if (offset !== 0) mobilePathSide = Math.sign(offset) || mobilePathSide;
+        setMobileAutoMoving(true);
+        return true;
+      }
+
+      mobilePathSide *= -1;
+      setMobileAutoMoving(false);
+      return false;
+    }
+
     function onMouseMove(event: MouseEvent) {
       const hasPointerLock = document.pointerLockElement === renderer.domElement;
       if (!running || (!hasPointerLock && event.buttons === 0)) return;
@@ -2608,9 +2707,6 @@ const mount = element<HTMLDivElement>("viewport");
         pitch -= dy * 0.0038;
         pitch = THREE.MathUtils.clamp(pitch, -0.62, 0.62);
       },
-      moveInput(x, y) {
-        mobileMove = { x, y };
-      },
       switchWeapon,
       choosePerk,
     };
@@ -2647,42 +2743,42 @@ const mount = element<HTMLDivElement>("viewport");
 
       const forward =
         (keys.has("KeyW") ? 1 : 0) -
-        (keys.has("KeyS") ? 1 : 0) +
-        -mobileMove.y;
+        (keys.has("KeyS") ? 1 : 0);
       const strafe =
         (keys.has("KeyD") ? 1 : 0) -
-        (keys.has("KeyA") ? 1 : 0) +
-        mobileMove.x;
-      const playerMoveMagnitude = Math.min(1, Math.hypot(strafe, forward));
+        (keys.has("KeyA") ? 1 : 0);
+      let playerMoveMagnitude = 0;
       if (running) {
+        if (isMobile) {
+          playerMoveMagnitude = advanceMobilePlayer(dt) ? 1 : 0;
+        } else {
+          playerMoveMagnitude = Math.min(1, Math.hypot(strafe, forward));
+          const magnitude = playerMoveMagnitude;
+          const normalizedStrafe = magnitude
+            ? strafe / Math.max(1, Math.hypot(strafe, forward))
+            : 0;
+          const normalizedForward = magnitude
+            ? forward / Math.max(1, Math.hypot(strafe, forward))
+            : 0;
+          const moveSpeed = aimingLive ? 3.2 : 5.25;
+          const moveX =
+            (Math.cos(yaw) * normalizedStrafe -
+              Math.sin(yaw) * normalizedForward) *
+            dt *
+            moveSpeed;
+          const moveZ =
+            (-Math.sin(yaw) * normalizedStrafe -
+              Math.cos(yaw) * normalizedForward) *
+            dt *
+            moveSpeed;
+          if (canPlayerMoveTo(camera.position.x + moveX, camera.position.z)) {
+            camera.position.x += moveX;
+          }
+          if (canPlayerMoveTo(camera.position.x, camera.position.z + moveZ)) {
+            camera.position.z += moveZ;
+          }
+        }
         const magnitude = playerMoveMagnitude;
-        const normalizedStrafe = magnitude ? strafe / Math.max(1, Math.hypot(strafe, forward)) : 0;
-        const normalizedForward = magnitude ? forward / Math.max(1, Math.hypot(strafe, forward)) : 0;
-        const moveSpeed = aimingLive ? 3.2 : 5.25;
-        const moveX =
-          (Math.cos(yaw) * normalizedStrafe - Math.sin(yaw) * normalizedForward) *
-          dt *
-          moveSpeed;
-        const moveZ =
-          (-Math.sin(yaw) * normalizedStrafe - Math.cos(yaw) * normalizedForward) *
-          dt *
-          moveSpeed;
-        const canMoveTo = (x: number, z: number) =>
-          x > -14.1 &&
-          x < 14.1 &&
-          z > -88.5 &&
-          z < 12.9 &&
-          !obstacleBoxes.some(
-            (obstacle) =>
-              Math.abs(x - obstacle.x) < obstacle.halfW &&
-              Math.abs(z - obstacle.z) < obstacle.halfD,
-          );
-        if (canMoveTo(camera.position.x + moveX, camera.position.z)) {
-          camera.position.x += moveX;
-        }
-        if (canMoveTo(camera.position.x, camera.position.z + moveZ)) {
-          camera.position.z += moveZ;
-        }
         if (magnitude > 0.05) walkPhase += dt * (aimingLive ? 7 : 10);
         camera.position.y = 1.72 + Math.sin(walkPhase) * 0.028 * magnitude;
       }
@@ -3093,56 +3189,30 @@ const mount = element<HTMLDivElement>("viewport");
     engineRef.current?.start();
   }
 
-  function onJoyStart(event: PointerEvent) {
-    event.stopPropagation();
-    joyPointer.current = event.pointerId;
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-  }
-
-  function onJoyMove(event: PointerEvent) {
-    event.stopPropagation();
-    if (joyPointer.current !== event.pointerId || !joystickRef.current) return;
-    const rect = joystickRef.current.getBoundingClientRect();
-    const x = THREE.MathUtils.clamp(
-      (event.clientX - (rect.left + rect.width / 2)) / (rect.width * 0.35),
-      -1,
-      1,
-    );
-    const y = THREE.MathUtils.clamp(
-      (event.clientY - (rect.top + rect.height / 2)) / (rect.height * 0.35),
-      -1,
-      1,
-    );
-    joystickRef.current.style.setProperty("--jx", `${x * 28}px`);
-    joystickRef.current.style.setProperty("--jy", `${y * 28}px`);
-    engineRef.current?.moveInput(x, y);
-  }
-
-  function onJoyEnd(event: PointerEvent) {
-    event.stopPropagation();
-    joyPointer.current = null;
-    joystickRef.current?.style.setProperty("--jx", "0px");
-    joystickRef.current?.style.setProperty("--jy", "0px");
-    engineRef.current?.moveInput(0, 0);
-  }
-
   function onLookStart(event: PointerEvent) {
-    if ((event.target as HTMLElement).closest("button")) return;
+    if (!event.isPrimary || lookPointer.current !== null) return;
+    event.preventDefault();
+    event.stopPropagation();
     lookPointer.current = event.pointerId;
     lookLast.current = { x: event.clientX, y: event.clientY };
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    engineRef.current?.setFiring(true);
   }
 
   function onLookMove(event: PointerEvent) {
     if (lookPointer.current !== event.pointerId) return;
+    event.preventDefault();
     const dx = event.clientX - lookLast.current.x;
     const dy = event.clientY - lookLast.current.y;
     lookLast.current = { x: event.clientX, y: event.clientY };
     engineRef.current?.aimDelta(dx, dy);
   }
 
-  function onLookEnd() {
+  function onLookEnd(event: PointerEvent) {
+    if (lookPointer.current !== event.pointerId) return;
+    event.preventDefault();
     lookPointer.current = null;
+    engineRef.current?.setFiring(false);
   }
 
   element<HTMLButtonElement>("reload-button").addEventListener("click", () =>
@@ -3185,44 +3255,7 @@ const mount = element<HTMLDivElement>("viewport");
   touchLayer.addEventListener("pointermove", onLookMove);
   touchLayer.addEventListener("pointerup", onLookEnd);
   touchLayer.addEventListener("pointercancel", onLookEnd);
-
-  joystickRef.current.addEventListener("pointerdown", onJoyStart);
-  joystickRef.current.addEventListener("pointermove", onJoyMove);
-  joystickRef.current.addEventListener("pointerup", onJoyEnd);
-  joystickRef.current.addEventListener("pointercancel", onJoyEnd);
-
-  const fireButton = element<HTMLButtonElement>("fire-button");
-  fireButton.addEventListener("pointerdown", (event) => {
-    event.stopPropagation();
-    engineRef.current?.setFiring(true);
-  });
-  const stopFiring = (event?: Event) => {
-    event?.stopPropagation();
-    engineRef.current?.setFiring(false);
-  };
-  fireButton.addEventListener("pointerup", stopFiring);
-  fireButton.addEventListener("pointercancel", stopFiring);
-
-  const aimButton = element<HTMLButtonElement>("aim-button");
-  aimButton.addEventListener("pointerdown", (event) => {
-    event.stopPropagation();
-    engineRef.current?.setAiming(true);
-  });
-  const stopAiming = (event?: Event) => {
-    event?.stopPropagation();
-    engineRef.current?.setAiming(false);
-  };
-  aimButton.addEventListener("pointerup", stopAiming);
-  aimButton.addEventListener("pointercancel", stopAiming);
-
-  element<HTMLButtonElement>("touch-reload").addEventListener("click", (event) => {
-    event.stopPropagation();
-    engineRef.current?.reload();
-  });
-  element<HTMLButtonElement>("haptics-toggle").addEventListener("click", (event) => {
-    event.stopPropagation();
-    setHaptics(!haptics);
-  });
+  touchLayer.addEventListener("lostpointercapture", onLookEnd);
 
   updateWeaponRail();
   setFeed(feed);

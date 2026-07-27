@@ -1146,134 +1146,82 @@ button {
 .touch-layer {
   position: absolute;
   z-index: 8;
-  inset: 80px 0 25px;
+  inset: 0;
   touch-action: none;
+  cursor: crosshair;
 }
 
-.joystick {
-  --jx: 0px;
-  --jy: 0px;
+.touch-steer-hint {
   position: absolute;
-  left: 24px;
-  bottom: 28px;
-  width: 118px;
-  height: 118px;
-  border: 1px solid rgba(255,255,255,.22);
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,255,255,.07), rgba(0,0,0,.18));
-}
-
-.joystick::before,
-.joystick::after {
-  content: "";
-  position: absolute;
-  background: rgba(255,255,255,.13);
-}
-
-.joystick::before {
   left: 50%;
-  top: 12px;
-  bottom: 12px;
-  width: 1px;
-}
-
-.joystick::after {
-  left: 12px;
-  right: 12px;
-  top: 50%;
-  height: 1px;
-}
-
-.joystick i {
-  position: absolute;
-  left: calc(50% - 25px);
-  top: calc(50% - 25px);
-  width: 50px;
-  height: 50px;
-  border: 1px solid var(--amber);
-  border-radius: 50%;
-  background: rgba(24,29,28,.8);
-  transform: translate(var(--jx), var(--jy));
-}
-
-.fire-button {
-  position: absolute;
-  right: 25px;
-  bottom: 30px;
-  width: 88px;
-  height: 88px;
-  border: 1px solid rgba(233,181,76,.8);
-  border-radius: 50%;
-  color: var(--amber-bright);
-  background: rgba(64,46,20,.55);
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: .14em;
-}
-
-.fire-button:active {
-  transform: scale(.94);
-  background: rgba(233,181,76,.42);
-}
-
-.touch-reload {
-  position: absolute;
-  right: 166px;
-  bottom: 34px;
-  width: 48px;
-  height: 48px;
-  border: 1px solid rgba(255,255,255,.3);
-  border-radius: 50%;
-  color: var(--ink);
-  background: rgba(5,8,8,.62);
-  font-size: 20px;
-}
-
-.haptics-toggle {
-  position: absolute;
-  left: 158px;
-  bottom: 28px;
+  bottom: max(24px, env(safe-area-inset-bottom));
   display: grid;
-  place-content: center;
-  width: 54px;
-  height: 48px;
-  border: 1px solid rgba(255,255,255,.3);
-  border-radius: 24px;
-  color: var(--ink);
-  background: rgba(5,8,8,.62);
+  justify-items: center;
+  gap: 7px;
+  color: rgba(231,235,229,.54);
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: touchHintFade 4.5s 1.2s both;
+}
+
+.touch-steer-hint i {
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(233,181,76,.75);
+  border-radius: 50%;
+  box-shadow: 0 0 0 7px rgba(233,181,76,.08);
+}
+
+.touch-steer-hint span {
+  font-size: 6px;
+  font-weight: 800;
+  letter-spacing: .23em;
+  white-space: nowrap;
+}
+
+@keyframes touchHintFade {
+  0%,
+  65% {
+    opacity: .92;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.auto-move-indicator {
+  position: absolute;
+  z-index: 7;
+  left: 50%;
+  bottom: max(42px, calc(env(safe-area-inset-bottom) + 25px));
+  display: grid;
+  grid-template-columns: 22px auto 22px;
+  gap: 9px;
+  align-items: center;
+  min-width: 178px;
+  padding: 8px 13px;
+  color: var(--amber-bright);
+  background: linear-gradient(90deg, transparent, rgba(6,10,10,.82), transparent);
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: autoAdvancePulse .72s ease-in-out infinite alternate;
+}
+
+.auto-move-indicator i {
+  height: 1px;
+  background: var(--amber);
+}
+
+.auto-move-indicator span {
   font-size: 7px;
   font-weight: 800;
-  letter-spacing: .1em;
+  letter-spacing: .22em;
+  white-space: nowrap;
 }
 
-.haptics-toggle small {
-  color: var(--amber);
-  font-size: 6px;
-  letter-spacing: .12em;
-}
-
-.haptics-toggle[aria-pressed="false"] {
-  opacity: .62;
-}
-
-.aim-button {
-  position: absolute;
-  right: 116px;
-  bottom: 87px;
-  width: 54px;
-  height: 54px;
-  border: 1px solid rgba(255,255,255,.38);
-  border-radius: 50%;
-  color: var(--ink);
-  background: rgba(5,8,8,.68);
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: .12em;
-}
-
-.aim-button:active {
-  border-color: var(--amber);
-  color: var(--amber-bright);
+@keyframes autoAdvancePulse {
+  from { opacity: .55; }
+  to { opacity: 1; }
 }
 
 @media (max-width: 700px) {
@@ -1523,6 +1471,17 @@ button {
 
   .perk-hint {
     margin-top: 8px;
+  }
+}
+
+@media (pointer: coarse) {
+  .reload-chip,
+  .weapon-rail {
+    display: none;
+  }
+
+  .weapon-hud {
+    pointer-events: none;
   }
 }
 
