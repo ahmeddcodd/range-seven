@@ -33,6 +33,16 @@ button {
   font: inherit;
 }
 
+html[data-youtube-paused="true"] .game-shell {
+  pointer-events: none !important;
+}
+
+html[data-youtube-paused="true"] .game-shell *,
+html[data-youtube-paused="true"] .game-shell *::before,
+html[data-youtube-paused="true"] .game-shell *::after {
+  animation-play-state: paused !important;
+}
+
 .game-shell {
   position: fixed;
   inset: 0;

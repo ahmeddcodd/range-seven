@@ -3,6 +3,12 @@ import "./styles.css";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { clone as cloneSkeleton } from "three/addons/utils/SkeletonUtils.js";
+import {
+  clearGameTimeout,
+  gameNow,
+  gameTimeout,
+  youtubePlayables,
+} from "./youtube-playables";
 
 type Weapon = {
   name: string;
@@ -391,6 +397,9 @@ const engineRef: {
     aimDelta: (dx: number, dy: number) => void;
     switchWeapon: (index: number) => void;
     choosePerk: (perk: PerkKey) => void;
+    pauseFromYouTube: () => void;
+    resumeFromYouTube: () => void;
+    setYouTubeAudioEnabled: (enabled: boolean) => void;
   } | null;
 } = { current: null };
 
@@ -417,13 +426,14 @@ let aiming = false;
 let isMobile = false;
 let interfaceLocked = false;
 let mobileAutoMoving = false;
+let youtubePaused = youtubePlayables.isPaused;
 
 const difficultyRef: { current: DifficultyKey } = { current: difficulty };
 const hapticsRef = { current: true };
 const lookPointer = { current: null as number | null };
 const lookLast = { current: { x: 0, y: 0 } };
 const feedTimer = {
-  current: null as ReturnType<typeof setTimeout> | null,
+  current: null as number | null,
 };
 
 function replayClass(target: HTMLElement, className: string) {
@@ -437,7 +447,8 @@ function updateTouchLayer() {
     isMobile &&
     started &&
     !gameOver &&
-    !interfaceLocked
+    !interfaceLocked &&
+    !youtubePaused
   );
 }
 
@@ -632,8 +643,8 @@ function setIsMobile(update: Updater<boolean>) {
 
 function showFeed(message: string) {
     setFeed(message);
-    if (feedTimer.current) clearTimeout(feedTimer.current);
-    feedTimer.current = setTimeout(() => setFeed(""), 850);
+    if (feedTimer.current) clearGameTimeout(feedTimer.current);
+    feedTimer.current = gameTimeout(() => setFeed(""), 850);
 }
 
 const coarsePointerQuery = matchMedia("(pointer: coarse)");
@@ -641,6 +652,20 @@ const onPointerModeChange = (event: MediaQueryListEvent) =>
   setIsMobile(event.matches);
 setIsMobile(coarsePointerQuery.matches);
 coarsePointerQuery.addEventListener("change", onPointerModeChange);
+const removeYouTubePauseListener = youtubePlayables.onPause(() => {
+  youtubePaused = true;
+  lookPointer.current = null;
+  updateTouchLayer();
+  engineRef.current?.pauseFromYouTube();
+});
+const removeYouTubeResumeListener = youtubePlayables.onResume(() => {
+  youtubePaused = false;
+  updateTouchLayer();
+  engineRef.current?.resumeFromYouTube();
+});
+const removeYouTubeAudioListener = youtubePlayables.onAudioChange((enabled) => {
+  engineRef.current?.setYouTubeAudioEnabled(enabled);
+});
 const mount = element<HTMLDivElement>("viewport");
 
     const scene = new THREE.Scene();
@@ -1176,7 +1201,7 @@ const mount = element<HTMLDivElement>("viewport");
 
         const difficultyConfig = DIFFICULTIES[difficultyRef.current];
         const drill = levelConfig(levelLive);
-        const now = performance.now();
+        const now = gameNow();
         targets.set(id, {
           id,
           group,
@@ -1333,7 +1358,7 @@ const mount = element<HTMLDivElement>("viewport");
         head,
         torso,
         hp: 100,
-        bornAt: performance.now(),
+        bornAt: gameNow(),
         lifetime: drill.targetLife * difficultyConfig.lifeScale,
         phase: 0,
         motion,
@@ -1727,9 +1752,28 @@ const mount = element<HTMLDivElement>("viewport");
     });
     const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffc167 });
     const audio = new AudioContext();
+    const masterAudioGain = audio.createGain();
+    masterAudioGain.gain.value = youtubePlayables.isAudioEnabled ? 1 : 0;
+    masterAudioGain.connect(audio.destination);
     let noiseBuffer: AudioBuffer | null = null;
+    let audioInitialized = false;
+    let effectiveAudioEnabled = youtubePlayables.isAudioEnabled;
+
+    function setYouTubeAudioEnabled(enabled: boolean) {
+      effectiveAudioEnabled = enabled;
+      const targetGain = enabled ? 1 : 0;
+      masterAudioGain.gain.cancelScheduledValues(audio.currentTime);
+      masterAudioGain.gain.setValueAtTime(targetGain, audio.currentTime);
+      if (!enabled) {
+        if (audio.state === "running") void audio.suspend();
+      } else if (audioInitialized && audio.state === "suspended") {
+        void audio.resume();
+      }
+    }
 
     function initAudio() {
+      audioInitialized = true;
+      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
       if (audio.state === "suspended") void audio.resume();
       if (!noiseBuffer) {
         noiseBuffer = audio.createBuffer(1, audio.sampleRate * 0.12, audio.sampleRate);
@@ -1741,6 +1785,7 @@ const mount = element<HTMLDivElement>("viewport");
     }
 
     function shotAudio(index: number) {
+      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
       initAudio();
       const t = audio.currentTime;
       const noise = audio.createBufferSource();
@@ -1752,7 +1797,7 @@ const mount = element<HTMLDivElement>("viewport");
       const gain = audio.createGain();
       gain.gain.setValueAtTime(0.42, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-      noise.connect(filter).connect(gain).connect(audio.destination);
+      noise.connect(filter).connect(gain).connect(masterAudioGain);
       noise.start(t);
       const thump = audio.createOscillator();
       const thumpGain = audio.createGain();
@@ -1761,12 +1806,13 @@ const mount = element<HTMLDivElement>("viewport");
       thump.frequency.exponentialRampToValueAtTime(48, t + 0.075);
       thumpGain.gain.setValueAtTime(0.28, t);
       thumpGain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
-      thump.connect(thumpGain).connect(audio.destination);
+      thump.connect(thumpGain).connect(masterAudioGain);
       thump.start(t);
       thump.stop(t + 0.1);
     }
 
     function tone(frequency: number, duration: number, volume = 0.1) {
+      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
       initAudio();
       const t = audio.currentTime;
       const osc = audio.createOscillator();
@@ -1775,7 +1821,7 @@ const mount = element<HTMLDivElement>("viewport");
       osc.frequency.setValueAtTime(frequency, t);
       gain.gain.setValueAtTime(volume, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
-      osc.connect(gain).connect(audio.destination);
+      osc.connect(gain).connect(masterAudioGain);
       osc.start(t);
       osc.stop(t + duration);
     }
@@ -1878,8 +1924,8 @@ const mount = element<HTMLDivElement>("viewport");
       announcement.hidden = false;
       replayClass(announcement, "drill-announcement");
       tone(420, 0.08, 0.055);
-      setTimeout(() => tone(680, 0.1, 0.05), 115);
-      setTimeout(() => {
+      gameTimeout(() => tone(680, 0.1, 0.05), 115);
+      gameTimeout(() => {
         if (token !== drillTransitionToken || gameOver || !started) return;
         announcement.hidden = true;
         setInterfaceLocked(false);
@@ -1887,7 +1933,7 @@ const mount = element<HTMLDivElement>("viewport");
         showFeed(`${drill.title} // HOSTILES DEPLOYED`);
         deployLevelSquad();
         const deploymentLevel = levelLive;
-        setTimeout(() => {
+        gameTimeout(() => {
           if (
             running &&
             !squadDeployed &&
@@ -1952,7 +1998,7 @@ const mount = element<HTMLDivElement>("viewport");
         mobilePathSide = levelLive % 2 === 0 ? -1 : 1;
       }
       tone(560, 0.11, 0.08);
-      setTimeout(() => tone(860, 0.16, 0.075), 105);
+      gameTimeout(() => tone(860, 0.16, 0.075), 105);
       showFeed(
         `${PERKS[perk].label} // ${
           unlocked > previousUnlocked ? "WEAPON UNLOCKED" : "EQUIPPED"
@@ -2206,7 +2252,7 @@ const mount = element<HTMLDivElement>("viewport");
         return;
       reloadingLive = true;
       const token = ++reloadToken;
-      reloadStarted = performance.now();
+      reloadStarted = gameNow();
       firing = false;
       aimingLive = false;
       setAiming(false);
@@ -2222,7 +2268,7 @@ const mount = element<HTMLDivElement>("viewport");
         importedReloadAction.reset().fadeIn(0.06).play();
       }
       const reloadSound = (progress: number, frequency: number, volume: number) => {
-        setTimeout(() => {
+        gameTimeout(() => {
           if (token === reloadToken && reloadingLive) {
             tone(frequency, 0.045, volume);
           }
@@ -2233,7 +2279,7 @@ const mount = element<HTMLDivElement>("viewport");
       reloadSound(0.48, 205, 0.04);
       reloadSound(0.69, 340, 0.065);
       reloadSound(0.87, 475, 0.07);
-      setTimeout(() => {
+      gameTimeout(() => {
         if (token !== reloadToken || !reloadingLive) return;
         const needed = weapon.ammo - ammoLive;
         const loaded = Math.min(needed, reserveLive);
@@ -2261,8 +2307,8 @@ const mount = element<HTMLDivElement>("viewport");
         setGameOver(true);
         document.exitPointerLock?.();
         tone(660, 0.18, 0.12);
-        setTimeout(() => tone(880, 0.2, 0.1), 115);
-        setTimeout(() => tone(1180, 0.28, 0.09), 235);
+        gameTimeout(() => tone(880, 0.2, 0.1), 115);
+        gameTimeout(() => tone(1180, 0.28, 0.09), 235);
         showFeed("BLACKSITE CLEARED");
         return;
       }
@@ -2272,7 +2318,7 @@ const mount = element<HTMLDivElement>("viewport");
       ghostActive = false;
       renderPerkStatus();
       tone(520, 0.18, 0.11);
-      setTimeout(() => tone(780, 0.24, 0.1), 120);
+      gameTimeout(() => tone(780, 0.24, 0.1), 120);
       showPerkSelection();
     }
 
@@ -2303,10 +2349,10 @@ const mount = element<HTMLDivElement>("viewport");
         if (!(hitMaterial instanceof THREE.MeshStandardMaterial)) continue;
         const previous = hitMaterial.emissive.getHex();
         hitMaterial.emissive.setHex(0xff6a45);
-        setTimeout(() => hitMaterial.emissive.setHex(previous), 70);
+        gameTimeout(() => hitMaterial.emissive.setHex(previous), 70);
       }
       if (target.hp <= 0) {
-        const killTime = performance.now();
+        const killTime = gameNow();
         target.dead = true;
         target.group.userData.fall = 0;
         if (target.actions) {
@@ -2360,14 +2406,14 @@ const mount = element<HTMLDivElement>("viewport");
           }${comboLive > 1 ? `  x${comboMultiplier.toFixed(2)}` : ""}`,
         );
         if (comboLive > 1) {
-          setTimeout(
+          gameTimeout(
             () => tone(880 + comboLive * 115, 0.08, 0.05),
             38,
           );
         }
         if (streakLive % 5 === 0) {
           tone(1320, 0.14, 0.08);
-          setTimeout(() => tone(1640, 0.11, 0.055), 90);
+          gameTimeout(() => tone(1640, 0.11, 0.055), 90);
         }
         const goal = levelConfig(levelLive).goal;
         if (levelKills >= goal) levelUp();
@@ -2381,7 +2427,7 @@ const mount = element<HTMLDivElement>("viewport");
 
     function shoot() {
       if (!running || reloadingLive) return;
-      const now = performance.now();
+      const now = gameNow();
       const weapon = WEAPONS[currentWeapon];
       if (now - lastShot < 60000 / weapon.rpm) return;
       lastShot = now;
@@ -2446,7 +2492,7 @@ const mount = element<HTMLDivElement>("viewport");
       if (hapticsRef.current && navigator.vibrate) {
         navigator.vibrate(currentWeapon === 2 ? 24 : 12);
       }
-      if (ammoLive === 0) setTimeout(reload, 220);
+      if (ammoLive === 0) gameTimeout(reload, 220);
     }
 
     function deployLevelSquad(forceFallback = false) {
@@ -2557,7 +2603,7 @@ const mount = element<HTMLDivElement>("viewport");
       const livingTargets = Array.from(targets.values()).filter(
         (target) =>
           !target.dead &&
-          performance.now() - target.bornAt >= 420,
+          gameNow() - target.bornAt >= 420,
       );
       if (livingTargets.length === 0) {
         mobileAdvanceRequested = false;
@@ -2627,6 +2673,7 @@ const mount = element<HTMLDivElement>("viewport");
     }
 
     function onMouseMove(event: MouseEvent) {
+      if (youtubePaused) return;
       const hasPointerLock = document.pointerLockElement === renderer.domElement;
       if (!running || (!hasPointerLock && event.buttons === 0)) return;
       yaw -= event.movementX * 0.0018;
@@ -2635,7 +2682,7 @@ const mount = element<HTMLDivElement>("viewport");
     }
 
     function onMouseDown(event: MouseEvent) {
-      if (!running) return;
+      if (youtubePaused || !running) return;
       if (document.pointerLockElement !== renderer.domElement) {
         tryPointerLock();
       }
@@ -2651,6 +2698,7 @@ const mount = element<HTMLDivElement>("viewport");
     }
 
     function onMouseUp(event: MouseEvent) {
+      if (youtubePaused) return;
       if (event.button === 2) {
         aimingLive = false;
         setAiming(false);
@@ -2659,10 +2707,12 @@ const mount = element<HTMLDivElement>("viewport");
     }
 
     function onContextMenu(event: MouseEvent) {
+      if (youtubePaused) return;
       event.preventDefault();
     }
 
     function onKeyDown(event: KeyboardEvent) {
+      if (youtubePaused) return;
       keys.add(event.code);
       if (event.code === "KeyR") reload();
       if (event.code === "Digit1") switchWeapon(0);
@@ -2671,11 +2721,12 @@ const mount = element<HTMLDivElement>("viewport");
     }
 
     function onKeyUp(event: KeyboardEvent) {
+      if (youtubePaused) return;
       keys.delete(event.code);
     }
 
     function onResize() {
-      if (!mount) return;
+      if (!mount || youtubePaused) return;
       camera.aspect = mount.clientWidth / mount.clientHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(mount.clientWidth, mount.clientHeight);
@@ -2690,32 +2741,59 @@ const mount = element<HTMLDivElement>("viewport");
     renderer.domElement.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("resize", onResize);
 
+    let frame: number | null = null;
+
     engineRef.current = {
       start: resetGame,
       reload,
       setFiring(value) {
+        if (youtubePaused) return;
         firing = value;
         if (value) shoot();
       },
       setAiming(value) {
+        if (youtubePaused) return;
         aimingLive = value;
         setAiming(value);
       },
       aimDelta(dx, dy) {
-        if (!running) return;
+        if (youtubePaused || !running) return;
         yaw -= dx * 0.0041;
         pitch -= dy * 0.0038;
         pitch = THREE.MathUtils.clamp(pitch, -0.62, 0.62);
       },
       switchWeapon,
       choosePerk,
+      pauseFromYouTube() {
+        firing = false;
+        aimingLive = false;
+        keys.clear();
+        setAiming(false);
+        setMobileAutoMoving(false);
+        navigator.vibrate?.(0);
+        document.exitPointerLock?.();
+        if (frame !== null) cancelAnimationFrame(frame);
+        frame = null;
+        clock.stop();
+        setYouTubeAudioEnabled(false);
+      },
+      resumeFromYouTube() {
+        onResize();
+        clock.start();
+        clock.getDelta();
+        startLoop();
+      },
+      setYouTubeAudioEnabled,
     };
 
-    let frame = 0;
     function animate() {
+      if (youtubePlayables.isPaused) {
+        frame = null;
+        return;
+      }
       frame = requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.04);
-      const elapsed = performance.now();
+      const elapsed = gameNow();
       importedWeaponMixer?.update(dt);
 
       if (running) {
@@ -3167,11 +3245,30 @@ const mount = element<HTMLDivElement>("viewport");
 
       dust.rotation.y += dt * 0.0015;
       renderer.render(scene, camera);
+      youtubePlayables.signalFirstFrameReady();
+      youtubePlayables.signalGameReady();
+      document.documentElement.dataset.gameReady = "true";
     }
+
+    function startLoop() {
+      if (frame !== null || youtubePlayables.isPaused) return;
+      clock.start();
+      clock.getDelta();
+      frame = requestAnimationFrame(animate);
+    }
+
+    if (youtubePlayables.isPaused) {
+      engineRef.current.pauseFromYouTube();
+    } else {
+      engineRef.current.setYouTubeAudioEnabled(
+        youtubePlayables.isAudioEnabled,
+      );
+    }
+
     window.addEventListener("beforeunload", () => {
       engineDisposed = true;
       reloadToken++;
-      cancelAnimationFrame(frame);
+      if (frame !== null) cancelAnimationFrame(frame);
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
       document.removeEventListener("keydown", onKeyDown);
@@ -3180,17 +3277,22 @@ const mount = element<HTMLDivElement>("viewport");
       renderer.domElement.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("resize", onResize);
       coarsePointerQuery.removeEventListener("change", onPointerModeChange);
+      removeYouTubePauseListener();
+      removeYouTubeResumeListener();
+      removeYouTubeAudioListener();
+      youtubePlayables.destroy();
       renderer.dispose();
       void audio.close();
     });
 
   function begin() {
+    if (youtubePaused) return;
     setStarted(true);
     engineRef.current?.start();
   }
 
   function onLookStart(event: PointerEvent) {
-    if (!event.isPrimary || lookPointer.current !== null) return;
+    if (youtubePaused || !event.isPrimary || lookPointer.current !== null) return;
     event.preventDefault();
     event.stopPropagation();
     lookPointer.current = event.pointerId;
@@ -3200,7 +3302,7 @@ const mount = element<HTMLDivElement>("viewport");
   }
 
   function onLookMove(event: PointerEvent) {
-    if (lookPointer.current !== event.pointerId) return;
+    if (youtubePaused || lookPointer.current !== event.pointerId) return;
     event.preventDefault();
     const dx = event.clientX - lookLast.current.x;
     const dy = event.clientY - lookLast.current.y;
@@ -3209,7 +3311,7 @@ const mount = element<HTMLDivElement>("viewport");
   }
 
   function onLookEnd(event: PointerEvent) {
-    if (lookPointer.current !== event.pointerId) return;
+    if (youtubePaused || lookPointer.current !== event.pointerId) return;
     event.preventDefault();
     lookPointer.current = null;
     engineRef.current?.setFiring(false);
@@ -3259,8 +3361,7 @@ const mount = element<HTMLDivElement>("viewport");
 
   updateWeaponRail();
   setFeed(feed);
-  document.documentElement.dataset.gameReady = "true";
-  animate();
+  startLoop();
 
 /*
   return (

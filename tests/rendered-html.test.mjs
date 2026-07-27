@@ -19,6 +19,12 @@ test("builds the complete static Range Seven game shell", async () => {
   assert.match(html, /data-perk="heal"/);
   assert.match(html, /HOLD TO FIRE/);
   assert.match(html, /id="auto-move-indicator"/);
+  assert.match(html, /https:\/\/www\.youtube\.com\/game_api\/v1/);
+  assert.ok(
+    html.indexOf("https://www.youtube.com/game_api/v1") <
+      html.indexOf('type="module"'),
+    "YouTube Playables SDK must load before the game module",
+  );
   assert.doesNotMatch(
     html,
     /id="(?:joystick|fire-button|aim-button|touch-reload|haptics-toggle)"/,
@@ -27,8 +33,16 @@ test("builds the complete static Range Seven game shell", async () => {
 });
 
 test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
-  const [source, styles, packageJson, viteConfig, vercelConfig] = await Promise.all([
+  const [
+    source,
+    playablesSource,
+    styles,
+    packageJson,
+    viteConfig,
+    vercelConfig,
+  ] = await Promise.all([
     readFile(new URL("../src/main.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/youtube-playables.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
@@ -59,6 +73,21 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /reserveLive \+= 60/);
   assert.match(source, /playerHealthLive \+ 40/);
   assert.match(source, /dataset\.gameReady = "true"/);
+  assert.match(source, /signalFirstFrameReady\(\)/);
+  assert.match(source, /signalGameReady\(\)/);
+  assert.match(source, /pauseFromYouTube/);
+  assert.match(source, /resumeFromYouTube/);
+  assert.match(source, /masterAudioGain/);
+  assert.match(source, /gameNow\(\)/);
+  assert.match(source, /gameTimeout\(/);
+  assert.doesNotMatch(source, /document\.visibilityState|visibilitychange/);
+  assert.match(playablesSource, /isAudioEnabled\(\)/);
+  assert.match(playablesSource, /onAudioEnabledChange/);
+  assert.match(playablesSource, /onPause/);
+  assert.match(playablesSource, /onResume/);
+  assert.match(playablesSource, /firstFrameReady/);
+  assert.match(playablesSource, /gameReady/);
+  assert.match(playablesSource, /stopImmediatePropagation/);
   assert.match(source, /function tryPointerLock/);
   assert.match(source, /pointerLockUnavailable/);
   assert.doesNotMatch(source, /function spawnTarget/);
@@ -81,7 +110,9 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(styles, /\[hidden\]\s*\{[\s\S]*display:\s*none\s*!important/);
   assert.match(styles, /@media \(pointer: coarse\)/);
   assert.match(styles, /\.auto-move-indicator/);
+  assert.match(styles, /data-youtube-paused="true"/);
   assert.match(viteConfig, /defineConfig/);
+  assert.match(viteConfig, /base:\s*"\.\/"/);
   assert.match(vercelConfig, /"framework": "vite"/);
   assert.match(vercelConfig, /"outputDirectory": "dist"/);
 

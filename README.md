@@ -48,6 +48,11 @@ npm start
 The repository produces a static Vite build in `dist` and can be imported
 directly into Vercel with no server runtime.
 
+The production build loads the YouTube Playables v1 SDK before the game
+bundle. YouTube pause/resume events control the simulation, rendering, input,
+animations, timers, and Web Audio lifecycle. YouTube's audio setting is the
+master audio authority, and build assets use package-safe relative paths.
+
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fahmeddcodd%2Frange-seven)
 
 ## Technology
