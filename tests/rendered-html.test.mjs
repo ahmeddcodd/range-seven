@@ -12,6 +12,11 @@ test("builds the complete static Range Seven game shell", async () => {
   assert.match(html, /ENTER BLACKSITE/);
   assert.match(html, /CLIFFSIDE QUALIFICATION/);
   assert.match(html, /id="viewport"/);
+  assert.match(html, /id="drill-announcement"/);
+  assert.match(html, /CHOOSE A FIELD PERK/);
+  assert.match(html, /data-perk="ammo"/);
+  assert.match(html, /data-perk="ghost"/);
+  assert.match(html, /data-perk="heal"/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
@@ -36,6 +41,13 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /BLACKSITE FINAL/);
   assert.match(source, /const LEVEL_ENCOUNTERS/);
   assert.match(source, /function deployLevelSquad/);
+  assert.match(source, /function advanceEnemyTowardPlayer/);
+  assert.match(source, /function announceDrillStart/);
+  assert.match(source, /function showPerkSelection/);
+  assert.match(source, /function choosePerk/);
+  assert.match(source, /ghostActive \? 0\.22/);
+  assert.match(source, /reserveLive \+= 60/);
+  assert.match(source, /playerHealthLive \+ 40/);
   assert.match(source, /dataset\.gameReady = "true"/);
   assert.match(source, /function tryPointerLock/);
   assert.match(source, /pointerLockUnavailable/);

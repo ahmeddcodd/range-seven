@@ -70,6 +70,53 @@
         <span>FLOW</span>
       </div>
 
+      <section
+        id="drill-announcement"
+        class="drill-announcement"
+        aria-live="assertive"
+        hidden
+      >
+        <span>DRILL <b id="announcement-level">01</b></span>
+        <h2 id="announcement-title">ZEROING</h2>
+        <div><i></i><strong id="announcement-enemies">5</strong><small>HOSTILES</small><i></i></div>
+        <p id="announcement-detail">ESTABLISH YOUR SIGHTLINE</p>
+      </section>
+
+      <section
+        id="perk-screen"
+        class="perk-screen"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="perk-title"
+        hidden
+      >
+        <div class="perk-panel">
+          <span id="perk-eyebrow" class="eyebrow">DRILL 01 SECURED</span>
+          <h2 id="perk-title">CHOOSE A FIELD PERK</h2>
+          <p>Pick one tactical advantage before the next hostile squad deploys.</p>
+          <div class="perk-grid">
+            <button data-perk="ammo">
+              <span class="perk-icon">+</span>
+              <b>AMMO CACHE</b>
+              <small>FULL MAG + 60 RESERVE</small>
+            </button>
+            <button data-perk="ghost">
+              <span class="perk-icon">◈</span>
+              <b>GHOST MODE</b>
+              <small>HARDER TO HIT NEXT DRILL</small>
+            </button>
+            <button data-perk="heal">
+              <span class="perk-icon">✚</span>
+              <b>FIELD MEDKIT</b>
+              <small>RESTORE 40 ARMOR</small>
+            </button>
+          </div>
+          <small class="perk-hint">TAP A PERK TO CONTINUE</small>
+        </div>
+      </section>
+
+      <aside id="perk-status" class="perk-status" aria-label="Active perks" hidden></aside>
+
       <section class="weapon-hud" aria-label="Weapon and ammunition">
         <div class="weapon-name">
           <span id="weapon-code">AR</span>

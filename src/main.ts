@@ -19,6 +19,16 @@ type Weapon = {
 };
 
 type DifficultyKey = "recruit" | "operator" | "elite";
+type PerkKey = "ammo" | "ghost" | "heal";
+
+const PERKS: Record<
+  PerkKey,
+  { label: string; status: string }
+> = {
+  ammo: { label: "AMMO CACHE", status: "AMMO" },
+  ghost: { label: "GHOST MODE", status: "GHOST" },
+  heal: { label: "FIELD MEDKIT", status: "MEDKIT" },
+};
 
 const DIFFICULTIES = {
   recruit: {
@@ -201,6 +211,14 @@ const LEVELS = [
   },
 ] as const;
 
+const DRILL_DETAILS = [
+  "ESTABLISH YOUR SIGHTLINE",
+  "TRACK MOVING CONTACTS",
+  "BREAK THE CROSSFIRE",
+  "CONTROL THE FLANKS",
+  "CLEAR THE BLACKSITE",
+] as const;
+
 const LEVEL_ENCOUNTERS: ReadonlyArray<
   ReadonlyArray<{
     x: number;
@@ -373,6 +391,7 @@ const engineRef: {
     aimDelta: (dx: number, dy: number) => void;
     moveInput: (x: number, y: number) => void;
     switchWeapon: (index: number) => void;
+    choosePerk: (perk: PerkKey) => void;
   } | null;
 } = { current: null };
 
@@ -398,6 +417,7 @@ let reloading = false;
 let aiming = false;
 let isMobile = false;
 let haptics = true;
+let interfaceLocked = false;
 
 const difficultyRef: { current: DifficultyKey } = { current: difficulty };
 const hapticsRef = { current: true };
@@ -416,7 +436,26 @@ function replayClass(target: HTMLElement, className: string) {
 }
 
 function updateTouchLayer() {
-  element("touch-layer").hidden = !(isMobile && started && !gameOver);
+  element("touch-layer").hidden = !(
+    isMobile &&
+    started &&
+    !gameOver &&
+    !interfaceLocked
+  );
+}
+
+function setInterfaceLocked(locked: boolean) {
+  interfaceLocked = locked;
+  if (locked) {
+    joyPointer.current = null;
+    lookPointer.current = null;
+    joystickRef.current.style.setProperty("--jx", "0px");
+    joystickRef.current.style.setProperty("--jy", "0px");
+    engineRef.current?.setFiring(false);
+    engineRef.current?.setAiming(false);
+    engineRef.current?.moveInput(0, 0);
+  }
+  updateTouchLayer();
 }
 
 function updateResults() {
@@ -603,7 +642,11 @@ function showFeed(message: string) {
     feedTimer.current = setTimeout(() => setFeed(""), 850);
 }
 
-setIsMobile(matchMedia("(pointer: coarse)").matches);
+const coarsePointerQuery = matchMedia("(pointer: coarse)");
+const onPointerModeChange = (event: MediaQueryListEvent) =>
+  setIsMobile(event.matches);
+setIsMobile(coarsePointerQuery.matches);
+coarsePointerQuery.addEventListener("change", onPointerModeChange);
 const mount = element<HTMLDivElement>("viewport");
 
     const scene = new THREE.Scene();
@@ -1165,7 +1208,9 @@ const mount = element<HTMLDivElement>("viewport");
           pistolAction,
           nextShotAt:
             now +
-            drill.firstShot * enemyFireScale(difficultyRef.current) +
+            drill.firstShot *
+              enemyFireScale(difficultyRef.current) *
+              (ghostActive ? 1.35 : 1) +
             deploymentDelay +
             Math.random() * 320,
           nextRollAt:
@@ -1772,11 +1817,19 @@ const mount = element<HTMLDivElement>("viewport");
     let pitch = -0.015;
     let mobileMove = { x: 0, y: 0 };
     let pointerLockUnavailable = false;
+    let drillTransitionToken = 0;
+    let perkSelectionPending = false;
+    let ghostActive = false;
+    const perkCounts: Record<PerkKey, number> = {
+      ammo: 0,
+      ghost: 0,
+      heal: 0,
+    };
 
     function tryPointerLock() {
       if (
         pointerLockUnavailable ||
-        matchMedia("(pointer: coarse)").matches ||
+        coarsePointerQuery.matches ||
         document.pointerLockElement === renderer.domElement
       ) {
         return;
@@ -1793,6 +1846,116 @@ const mount = element<HTMLDivElement>("viewport");
       } catch {
         pointerLockUnavailable = true;
       }
+    }
+
+    function renderPerkStatus() {
+      const container = element<HTMLElement>("perk-status");
+      container.replaceChildren();
+      (Object.keys(PERKS) as PerkKey[]).forEach((key) => {
+        const count = perkCounts[key];
+        if (count <= 0) return;
+        const chip = document.createElement("span");
+        chip.dataset.perk = key;
+        chip.classList.toggle("active", key === "ghost" && ghostActive);
+        chip.textContent =
+          key === "ghost" && ghostActive
+            ? "GHOST ACTIVE"
+            : `${PERKS[key].status}${count > 1 ? ` x${count}` : ""}`;
+        container.appendChild(chip);
+      });
+      container.hidden = container.childElementCount === 0;
+    }
+
+    function announceDrillStart() {
+      const token = ++drillTransitionToken;
+      const drill = levelConfig(levelLive);
+      running = false;
+      firing = false;
+      aimingLive = false;
+      setAiming(false);
+      setInterfaceLocked(true);
+      element("announcement-level").textContent = String(levelLive).padStart(2, "0");
+      element("announcement-title").textContent = drill.title;
+      element("announcement-enemies").textContent = String(drill.goal);
+      element("announcement-detail").textContent =
+        DRILL_DETAILS[Math.min(levelLive - 1, DRILL_DETAILS.length - 1)];
+      const announcement = element<HTMLElement>("drill-announcement");
+      announcement.hidden = false;
+      replayClass(announcement, "drill-announcement");
+      tone(420, 0.08, 0.055);
+      setTimeout(() => tone(680, 0.1, 0.05), 115);
+      setTimeout(() => {
+        if (token !== drillTransitionToken || gameOver || !started) return;
+        announcement.hidden = true;
+        setInterfaceLocked(false);
+        running = true;
+        showFeed(`${drill.title} // HOSTILES DEPLOYED`);
+        deployLevelSquad();
+        const deploymentLevel = levelLive;
+        setTimeout(() => {
+          if (
+            running &&
+            !squadDeployed &&
+            levelLive === deploymentLevel
+          ) {
+            deployLevelSquad(true);
+          }
+        }, 2200);
+        tryPointerLock();
+      }, 1550);
+    }
+
+    function showPerkSelection() {
+      perkSelectionPending = true;
+      running = false;
+      firing = false;
+      aimingLive = false;
+      setAiming(false);
+      setInterfaceLocked(true);
+      element("drill-announcement").hidden = true;
+      element("perk-eyebrow").textContent =
+        `DRILL ${String(levelLive).padStart(2, "0")} SECURED`;
+      element<HTMLElement>("perk-screen").hidden = false;
+      document.exitPointerLock?.();
+      showFeed("DRILL COMPLETE // CHOOSE PERK");
+    }
+
+    function choosePerk(perk: PerkKey) {
+      if (!perkSelectionPending) return;
+      perkSelectionPending = false;
+      perkCounts[perk]++;
+      if (perk === "ammo") {
+        ammoLive = WEAPONS[currentWeapon].ammo;
+        reserveLive += 60;
+        setAmmo({ mag: ammoLive, reserve: reserveLive });
+      } else if (perk === "ghost") {
+        ghostActive = true;
+      } else {
+        playerHealthLive = Math.min(100, playerHealthLive + 40);
+        setHealth(playerHealthLive);
+      }
+      element<HTMLElement>("perk-screen").hidden = true;
+      renderPerkStatus();
+
+      const completedDrill = levelConfig(levelLive);
+      const previousUnlocked = unlocked;
+      levelLive++;
+      levelKills = 0;
+      timeLive += completedDrill.timeBonus;
+      timeAccumulator = 0;
+      unlocked = Math.min(WEAPONS.length, 1 + Math.floor(levelLive / 2));
+      setLevel(levelLive);
+      setTime(Math.ceil(timeLive));
+      setObjective(levelObjective(levelLive));
+      setDamageFlash((value) => value + 1);
+      tone(560, 0.11, 0.08);
+      setTimeout(() => tone(860, 0.16, 0.075), 105);
+      showFeed(
+        `${PERKS[perk].label} // ${
+          unlocked > previousUnlocked ? "WEAPON UNLOCKED" : "EQUIPPED"
+        }`,
+      );
+      announceDrillStart();
     }
 
     function burst(position: THREE.Vector3, hit = false) {
@@ -1886,7 +2049,8 @@ const mount = element<HTMLDivElement>("viewport");
         THREE.MathUtils.clamp(
           drill.enemyAccuracy +
             enemyAccuracyAdjustment(activeDifficulty) -
-            playerMoving * 0.18,
+            playerMoving * 0.18 -
+            (ghostActive ? 0.22 : 0),
           0.12,
           0.72,
         );
@@ -1975,6 +2139,12 @@ const mount = element<HTMLDivElement>("viewport");
       unlocked = 1;
       ammoLive = WEAPONS[0].ammo;
       reserveLive = WEAPONS[0].reserve;
+      perkSelectionPending = false;
+      ghostActive = false;
+      drillTransitionToken++;
+      perkCounts.ammo = 0;
+      perkCounts.ghost = 0;
+      perkCounts.heal = 0;
       aimingLive = false;
       reloadingLive = false;
       reloadToken++;
@@ -1997,21 +2167,13 @@ const mount = element<HTMLDivElement>("viewport");
       pitch = -0.015;
       buildWeapon(0);
       squadDeployed = false;
-      running = true;
+      running = false;
+      element<HTMLElement>("perk-screen").hidden = true;
+      element<HTMLElement>("drill-announcement").hidden = true;
+      renderPerkStatus();
       showFeed("BLACKSITE LIVE");
-      deployLevelSquad();
-      const deploymentLevel = levelLive;
-      setTimeout(() => {
-        if (
-          running &&
-          !squadDeployed &&
-          levelLive === deploymentLevel
-        ) {
-          deployLevelSquad(true);
-        }
-      }, 2200);
       initAudio();
-      tryPointerLock();
+      announceDrillStart();
     }
 
     function switchWeapon(index: number) {
@@ -2083,12 +2245,12 @@ const mount = element<HTMLDivElement>("viewport");
     }
 
     function levelUp() {
-      const completedDrill = levelConfig(levelLive);
       if (levelLive >= LEVELS.length) {
         running = false;
         firing = false;
         aimingLive = false;
         setAiming(false);
+        setInterfaceLocked(true);
         setObjective("BLACKSITE CLEARED");
         setGameOver(true);
         document.exitPointerLock?.();
@@ -2098,26 +2260,14 @@ const mount = element<HTMLDivElement>("viewport");
         showFeed("BLACKSITE CLEARED");
         return;
       }
-      const previousUnlocked = unlocked;
       targets.forEach((target) => targetRoot.remove(target.group));
       targets.clear();
       squadDeployed = false;
-      levelLive++;
-      levelKills = 0;
-      timeLive += completedDrill.timeBonus;
-      unlocked = Math.min(WEAPONS.length, 1 + Math.floor(levelLive / 2));
-      setLevel(levelLive);
-      setTime(Math.ceil(timeLive));
-      setObjective(levelObjective(levelLive));
+      ghostActive = false;
+      renderPerkStatus();
       tone(520, 0.18, 0.11);
       setTimeout(() => tone(780, 0.24, 0.1), 120);
-      showFeed(
-        `${levelConfig(levelLive).title} // ${
-          unlocked > previousUnlocked ? "WEAPON UNLOCKED" : "PRESSURE UP"
-        }`,
-      );
-      setDamageFlash((v) => v + 1);
-      deployLevelSquad();
+      showPerkSelection();
     }
 
     function registerHit(hit: THREE.Intersection<THREE.Object3D>) {
@@ -2307,7 +2457,7 @@ const mount = element<HTMLDivElement>("viewport");
       showFeed(`${levelConfig(levelLive).title} // HOSTILES DEPLOYED`);
     }
 
-    function canEnemyMoveTo(x: number, z: number) {
+    function canEnemyMoveTo(x: number, z: number, movingTarget?: TargetState) {
       return (
         x > -13.7 &&
         x < 13.7 &&
@@ -2317,8 +2467,64 @@ const mount = element<HTMLDivElement>("viewport");
           (obstacle) =>
             Math.abs(x - obstacle.x) < obstacle.halfW + 0.42 &&
             Math.abs(z - obstacle.z) < obstacle.halfD + 0.42,
+        ) &&
+        !Array.from(targets.values()).some(
+          (other) =>
+            other !== movingTarget &&
+            !other.dead &&
+            Math.hypot(x - other.baseX, z - other.baseZ) < 0.78,
         )
       );
+    }
+
+    function advanceEnemyTowardPlayer(
+      target: TargetState,
+      speed: number,
+      dt: number,
+    ) {
+      const toPlayerX = camera.position.x - target.baseX;
+      const toPlayerZ = camera.position.z - target.baseZ;
+      const distanceToPlayer = Math.max(0.001, Math.hypot(toPlayerX, toPlayerZ));
+      if (distanceToPlayer <= 3.8) {
+        return { moved: false, directionX: 0, directionZ: 0, arrived: true };
+      }
+
+      const desiredAngle = Math.atan2(toPlayerX, toPlayerZ);
+      const flank = target.flankDirection ?? 1;
+      const angleOffsets = [
+        0,
+        flank * 0.38,
+        flank * -0.38,
+        flank * 0.76,
+        flank * -0.76,
+        flank * 1.12,
+        flank * -1.12,
+      ];
+      const step = Math.min(
+        speed * DIFFICULTIES[difficultyRef.current].speedScale * dt,
+        Math.max(0, distanceToPlayer - 3.8),
+      );
+
+      for (const offset of angleOffsets) {
+        const angle = desiredAngle + offset;
+        const directionX = Math.sin(angle);
+        const directionZ = Math.cos(angle);
+        const nextX = target.baseX + directionX * step;
+        const nextZ = target.baseZ + directionZ * step;
+        if (!canEnemyMoveTo(nextX, nextZ, target)) continue;
+        target.baseX = nextX;
+        target.baseZ = nextZ;
+        if (offset !== 0) target.flankDirection = Math.sign(offset) || flank;
+        return {
+          moved: true,
+          directionX,
+          directionZ,
+          arrived: false,
+        };
+      }
+
+      target.flankDirection = -flank;
+      return { moved: false, directionX: 0, directionZ: 0, arrived: false };
     }
 
     function onMouseMove(event: MouseEvent) {
@@ -2406,6 +2612,7 @@ const mount = element<HTMLDivElement>("viewport");
         mobileMove = { x, y };
       },
       switchWeapon,
+      choosePerk,
     };
 
     let frame = 0;
@@ -2689,39 +2896,18 @@ const mount = element<HTMLDivElement>("viewport");
           target.group.rotation.y = 0;
           target.group.rotation.z = 0;
           let movementDirection = 0;
+          let advancedThisFrame = false;
           if (target.advancing) {
-            const toPlayerX = camera.position.x - target.baseX;
-            const toPlayerZ = camera.position.z - target.baseZ;
-            const distanceToPlayer = Math.max(
-              0.001,
-              Math.hypot(toPlayerX, toPlayerZ),
+            const advance = advanceEnemyTowardPlayer(
+              target,
+              drill.advanceSpeed,
+              dt,
             );
-            if (distanceToPlayer <= 3.8) {
+            if (advance.arrived) {
               target.advancing = false;
-            } else {
-              const directionX = toPlayerX / distanceToPlayer;
-              const directionZ = toPlayerZ / distanceToPlayer;
-              const step = drill.advanceSpeed * dt;
-              const directX = target.baseX + directionX * step;
-              const directZ = target.baseZ + directionZ * step;
-              if (canEnemyMoveTo(directX, directZ)) {
-                target.baseX = directX;
-                target.baseZ = directZ;
-              } else {
-                const flank = target.flankDirection ?? 1;
-                const sideX = -directionZ * flank;
-                const sideZ = directionX * flank;
-                const flankX = target.baseX + sideX * step * 1.2;
-                const flankZ = target.baseZ + sideZ * step * 1.2;
-                if (canEnemyMoveTo(flankX, flankZ)) {
-                  target.baseX = flankX;
-                  target.baseZ = flankZ;
-                } else {
-                  target.flankDirection = -flank;
-                }
-              }
-              movementDirection = Math.sign(directionX);
             }
+            advancedThisFrame = advance.moved;
+            movementDirection = Math.sign(advance.directionX);
             target.group.position.x = target.baseX;
             target.group.position.z = target.baseZ;
           } else if (target.motion === "strafe") {
@@ -2756,7 +2942,7 @@ const mount = element<HTMLDivElement>("viewport");
             const isRolling =
               target.rollingUntil !== undefined &&
               elapsed < target.rollingUntil;
-            if (target.advancing) {
+            if (target.advancing && advancedThisFrame) {
               setEnemyLocomotion(target, "run");
             } else if (!isRolling) {
               setEnemyLocomotion(
@@ -2809,7 +2995,8 @@ const mount = element<HTMLDivElement>("viewport");
                 target.nextShotAt =
                   elapsed +
                   drill.fireDelay *
-                    enemyFireScale(difficultyRef.current) +
+                    enemyFireScale(difficultyRef.current) *
+                    (ghostActive ? 1.3 : 1) +
                   Math.random() * 520;
               } else {
                 target.nextShotAt = elapsed + 180;
@@ -2896,6 +3083,7 @@ const mount = element<HTMLDivElement>("viewport");
       renderer.domElement.removeEventListener("mousedown", onMouseDown);
       renderer.domElement.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("resize", onResize);
+      coarsePointerQuery.removeEventListener("change", onPointerModeChange);
       renderer.dispose();
       void audio.close();
     });
@@ -2974,11 +3162,22 @@ const mount = element<HTMLDivElement>("viewport");
         setTime(DIFFICULTIES[key].startTime);
       });
     });
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-perk]")
+    .forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        engineRef.current?.choosePerk(button.dataset.perk as PerkKey);
+      });
+    });
   element<HTMLButtonElement>("deploy-button").addEventListener("click", begin);
   element<HTMLButtonElement>("restart-button").addEventListener("click", begin);
   element<HTMLButtonElement>("change-difficulty").addEventListener("click", () => {
     setGameOver(false);
     setStarted(false);
+    setInterfaceLocked(false);
+    element<HTMLElement>("perk-screen").hidden = true;
+    element<HTMLElement>("drill-announcement").hidden = true;
   });
 
   const touchLayer = element<HTMLDivElement>("touch-layer");

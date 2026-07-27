@@ -438,6 +438,267 @@ button {
   letter-spacing: .3em;
 }
 
+.drill-announcement {
+  position: absolute;
+  z-index: 16;
+  left: 50%;
+  top: 50%;
+  width: min(620px, 88vw);
+  padding: 34px 46px 30px;
+  color: var(--ink);
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  background:
+    linear-gradient(90deg, transparent, rgba(5, 9, 9, .91) 15% 85%, transparent),
+    repeating-linear-gradient(115deg, transparent 0 42px, rgba(233,181,76,.035) 43px 44px);
+  animation: drillArrival 1.55s cubic-bezier(.18,.82,.2,1) both;
+}
+
+.drill-announcement::before,
+.drill-announcement::after {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--amber), transparent);
+}
+
+.drill-announcement::before {
+  top: 0;
+}
+
+.drill-announcement::after {
+  bottom: 0;
+}
+
+.drill-announcement > span {
+  color: var(--amber);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .42em;
+}
+
+.drill-announcement > span b {
+  color: var(--amber-bright);
+  font: 700 12px "Courier New", monospace;
+}
+
+.drill-announcement h2 {
+  margin: 7px 0 10px;
+  font-size: clamp(42px, 7vw, 78px);
+  line-height: .92;
+  letter-spacing: -.045em;
+  text-shadow: 0 8px 28px rgba(0,0,0,.6);
+}
+
+.drill-announcement div {
+  display: grid;
+  grid-template-columns: 1fr auto auto 1fr;
+  gap: 10px;
+  align-items: center;
+  color: var(--amber-bright);
+}
+
+.drill-announcement div i {
+  height: 1px;
+  background: rgba(233,181,76,.42);
+}
+
+.drill-announcement div strong {
+  font: 700 30px/1 "Courier New", monospace;
+}
+
+.drill-announcement div small {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .26em;
+}
+
+.drill-announcement p {
+  margin: 13px 0 0;
+  color: rgba(231,235,229,.58);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: .3em;
+}
+
+@keyframes drillArrival {
+  0% {
+    opacity: 0;
+    filter: blur(10px);
+    transform: translate(-50%, -43%) scale(.96);
+  }
+  18%,
+  76% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(5px);
+    transform: translate(-50%, -54%) scale(1.015);
+  }
+}
+
+.perk-screen {
+  position: absolute;
+  z-index: 24;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  cursor: default;
+  background:
+    radial-gradient(circle at 50% 48%, rgba(99, 78, 36, .18), transparent 45%),
+    rgba(3, 7, 7, .84);
+  backdrop-filter: blur(8px);
+}
+
+.perk-panel {
+  position: relative;
+  width: min(820px, 94vw);
+  padding: 34px 38px 30px;
+  border-top: 1px solid rgba(233,181,76,.65);
+  border-bottom: 1px solid rgba(233,181,76,.25);
+  text-align: center;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.025), transparent 45%),
+    rgba(7, 12, 12, .92);
+  box-shadow: 0 28px 90px rgba(0,0,0,.55);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+
+.perk-panel h2 {
+  margin: 7px 0 5px;
+  font-size: clamp(28px, 4.5vw, 52px);
+  line-height: 1;
+  letter-spacing: -.035em;
+}
+
+.perk-panel > p {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: .08em;
+}
+
+.perk-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.perk-grid button {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  place-items: center;
+  min-height: 158px;
+  border: 1px solid rgba(255,255,255,.14);
+  padding: 19px 14px 16px;
+  color: var(--ink);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent),
+    rgba(11, 17, 17, .86);
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, transform .16s ease;
+  touch-action: manipulation;
+}
+
+.perk-grid button::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 2px;
+  background: var(--amber);
+  opacity: .22;
+}
+
+.perk-grid button:hover,
+.perk-grid button:focus-visible {
+  outline: 0;
+  border-color: var(--amber);
+  background: rgba(75, 57, 25, .42);
+  transform: translateY(-3px);
+}
+
+.perk-grid button:active {
+  transform: scale(.98);
+}
+
+.perk-icon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 13px;
+  border: 1px solid rgba(233,181,76,.65);
+  border-radius: 50%;
+  color: var(--amber-bright);
+  background: radial-gradient(circle, rgba(233,181,76,.17), rgba(233,181,76,.025));
+  font: 700 26px/1 "Courier New", monospace;
+  box-shadow: 0 0 26px rgba(233,181,76,.08);
+}
+
+.perk-grid b {
+  font-size: 11px;
+  letter-spacing: .16em;
+}
+
+.perk-grid small {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 7px;
+  letter-spacing: .13em;
+}
+
+.perk-hint {
+  display: block;
+  margin-top: 18px;
+  color: rgba(231,235,229,.38);
+  font-size: 6px;
+  letter-spacing: .3em;
+}
+
+.perk-status {
+  position: absolute;
+  z-index: 7;
+  left: 20px;
+  bottom: 35px;
+  display: flex;
+  max-width: 42vw;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.perk-status span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid rgba(233,181,76,.32);
+  padding: 4px 8px;
+  color: rgba(231,235,229,.76);
+  background: rgba(5,9,9,.7);
+  font-size: 6px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.perk-status span.active {
+  border-color: rgba(140,228,220,.68);
+  color: #a9f2eb;
+  box-shadow: inset 0 -1px #8ce4dc;
+}
+
 .weapon-hud {
   position: absolute;
   z-index: 6;
@@ -1084,6 +1345,74 @@ button {
     top: calc(50% + 38px);
   }
 
+  .drill-announcement {
+    width: min(520px, 94vw);
+    padding: 26px 24px 23px;
+  }
+
+  .drill-announcement h2 {
+    font-size: clamp(38px, 12vw, 64px);
+  }
+
+  .perk-screen {
+    align-items: center;
+    padding: max(12px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+
+  .perk-panel {
+    width: min(520px, 96vw);
+    padding: 22px 16px 18px;
+  }
+
+  .perk-panel > p {
+    margin-bottom: 14px;
+    font-size: 8px;
+  }
+
+  .perk-grid {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .perk-grid button {
+    grid-template-columns: 48px 1fr;
+    grid-template-rows: auto auto;
+    justify-items: start;
+    min-height: 74px;
+    padding: 10px 12px;
+    text-align: left;
+  }
+
+  .perk-icon {
+    grid-row: 1 / 3;
+    width: 42px;
+    height: 42px;
+    margin: 0;
+    font-size: 19px;
+  }
+
+  .perk-grid small {
+    margin-top: 3px;
+  }
+
+  .perk-hint {
+    margin-top: 11px;
+  }
+
+  .perk-status {
+    left: 12px;
+    bottom: 9px;
+    max-width: 48vw;
+    flex-wrap: wrap-reverse;
+  }
+
+  .perk-status span {
+    min-height: 20px;
+    padding: 3px 6px;
+    font-size: 5px;
+  }
+
   .start-screen {
     padding: 20px;
   }
@@ -1156,6 +1485,44 @@ button {
 
   .legal {
     display: none;
+  }
+
+  .perk-panel {
+    padding-top: 17px;
+    padding-bottom: 14px;
+  }
+
+  .perk-panel h2 {
+    font-size: 28px;
+  }
+
+  .perk-panel > p {
+    margin-bottom: 10px;
+  }
+
+  .perk-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .perk-grid button {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    justify-items: center;
+    min-height: 112px;
+    padding: 10px 8px;
+    text-align: center;
+  }
+
+  .perk-icon {
+    grid-row: auto;
+    width: 38px;
+    height: 38px;
+    margin-bottom: 5px;
+  }
+
+  .perk-hint {
+    margin-top: 8px;
   }
 }
 
