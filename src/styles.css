@@ -328,11 +328,6 @@ html[data-youtube-paused="true"] .game-shell *::after {
   transition: opacity .14s ease, transform .14s ease;
 }
 
-.crosshair.aiming {
-  opacity: 0;
-  transform: translate(-50%, -50%) scale(.45);
-}
-
 .crosshair i,
 .hitmarker i {
   position: absolute;
@@ -1189,6 +1184,76 @@ html[data-youtube-paused="true"] .game-shell *::after {
   white-space: nowrap;
 }
 
+.mobile-shoot-button {
+  position: absolute;
+  right: max(22px, calc(env(safe-area-inset-right) + 14px));
+  bottom: max(88px, calc(env(safe-area-inset-bottom) + 72px));
+  display: grid;
+  place-items: center;
+  width: 78px;
+  height: 78px;
+  padding: 0;
+  border: 1px solid rgba(151, 57, 47, .68);
+  border-radius: 50%;
+  color: rgba(230, 218, 188, .9);
+  background:
+    radial-gradient(circle at 42% 35%, rgba(135, 42, 34, .48), transparent 36%),
+    radial-gradient(circle, rgba(43, 18, 15, .92) 0 53%, rgba(10, 10, 8, .88) 55% 100%);
+  box-shadow:
+    0 0 0 7px rgba(72, 23, 19, .18),
+    inset 0 0 18px rgba(0, 0, 0, .72),
+    0 8px 28px rgba(0, 0, 0, .62);
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-shoot-button::before,
+.mobile-shoot-button::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.mobile-shoot-button::before {
+  inset: 7px;
+  border: 1px dashed rgba(196, 112, 84, .25);
+}
+
+.mobile-shoot-button::after {
+  inset: 19px;
+  border: 1px solid rgba(214, 176, 124, .16);
+}
+
+.mobile-shoot-button i {
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(206, 188, 147, .55);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 5px rgba(128, 39, 32, .72);
+  pointer-events: none;
+}
+
+.mobile-shoot-button span {
+  margin-top: -13px;
+  color: rgba(213, 201, 171, .8);
+  font: 700 6px/1 "Arial Narrow", Arial, sans-serif;
+  letter-spacing: .18em;
+  pointer-events: none;
+}
+
+.mobile-shoot-button:active {
+  border-color: rgba(221, 97, 75, .9);
+  background:
+    radial-gradient(circle at center, rgba(151, 43, 34, .78), transparent 48%),
+    rgba(25, 10, 8, .96);
+  box-shadow:
+    0 0 0 10px rgba(115, 35, 28, .24),
+    inset 0 0 20px rgba(0, 0, 0, .62);
+  transform: scale(.94);
+}
+
 @keyframes touchHintFade {
   0%,
   65% {
@@ -1429,6 +1494,13 @@ html[data-youtube-paused="true"] .game-shell *::after {
 }
 
 @media (max-height: 560px) {
+  .mobile-shoot-button {
+    right: max(18px, calc(env(safe-area-inset-right) + 10px));
+    bottom: max(66px, calc(env(safe-area-inset-bottom) + 54px));
+    width: 70px;
+    height: 70px;
+  }
+
   .start-screen h1 {
     font-size: 72px;
   }
@@ -2777,5 +2849,195 @@ body {
 
   .survival-hud {
     width: 132px;
+  }
+}
+
+/* The live HUD keeps only the information needed in the middle of a fight. */
+.score-hud {
+  position: absolute;
+  z-index: 7;
+  top: max(17px, env(safe-area-inset-top));
+  left: max(18px, env(safe-area-inset-left));
+  display: grid;
+  gap: 3px;
+  min-width: 108px;
+  padding: 7px 18px 8px 13px;
+  color: #d9d0b6;
+  background:
+    radial-gradient(ellipse at 20% 52%, rgba(15, 13, 9, .76), transparent 73%);
+  pointer-events: none;
+  filter: drop-shadow(0 4px 9px rgba(0, 0, 0, .72));
+}
+
+.score-hud::before {
+  content: "";
+  position: absolute;
+  top: 7px;
+  bottom: 8px;
+  left: 2px;
+  width: 2px;
+  background: linear-gradient(transparent, #7d211c 24% 78%, transparent);
+  transform: rotate(-4deg);
+}
+
+.score-hud::after {
+  content: "";
+  position: absolute;
+  right: 7px;
+  bottom: 2px;
+  left: 12px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(124, 39, 32, .78), transparent);
+}
+
+.score-hud span {
+  color: rgba(159, 146, 116, .62);
+  font: italic 6px/1 Georgia, "Times New Roman", serif;
+  letter-spacing: .16em;
+  text-transform: lowercase;
+}
+
+.score-hud strong {
+  color: rgba(225, 217, 193, .94);
+  font: 400 23px/.95 Georgia, "Times New Roman", serif;
+  letter-spacing: .035em;
+  text-shadow: 0 2px 8px #000;
+}
+
+@media (max-width: 760px) {
+  .score-hud {
+    top: max(10px, env(safe-area-inset-top));
+    left: max(10px, env(safe-area-inset-left));
+    min-width: 92px;
+    padding: 6px 14px 7px 11px;
+  }
+
+  .score-hud strong {
+    font-size: 19px;
+  }
+}
+
+.kill-feed {
+  right: auto;
+  top: calc(50% + 52px);
+  width: max-content;
+  min-width: 0;
+  max-width: min(88vw, 390px);
+  padding: 7px 13px 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 2px;
+  color: rgba(235, 226, 202, .94);
+  background:
+    linear-gradient(90deg, transparent, rgba(5, 7, 6, .86) 15% 85%, transparent);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .52);
+  font: 700 9px/1.25 "Arial Narrow", Arial, sans-serif;
+  font-style: normal;
+  letter-spacing: .12em;
+  text-align: center;
+  text-shadow: 0 2px 5px #000;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.kill-feed.visible {
+  animation: killConfirmIn .18s ease-out both;
+}
+
+@keyframes killConfirmIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(7px) scale(.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 760px) {
+  .kill-feed {
+    top: calc(50% + 43px);
+    max-width: 86vw;
+    padding: 6px 10px 7px;
+    font-size: 8px;
+    letter-spacing: .09em;
+  }
+}
+
+.shot-pulse {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  opacity: 0;
+  background:
+    radial-gradient(circle at center, rgba(255, 218, 154, .12), transparent 8%),
+    radial-gradient(circle at center, transparent 48%, rgba(112, 49, 32, .055) 100%);
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.shot-pulse.active {
+  animation: shotPulse .09s ease-out both;
+}
+
+@keyframes shotPulse {
+  0% { opacity: .92; }
+  100% { opacity: 0; }
+}
+
+.hitmarker.pulse.head i {
+  height: 2px;
+  background: #f0cf83;
+  box-shadow: 0 0 7px rgba(235, 190, 99, .72);
+}
+
+.hitmarker.pulse.kill {
+  animation: killMarker .26s cubic-bezier(.18, .82, .24, 1) both;
+}
+
+.hitmarker.pulse.kill i {
+  height: 2px;
+  background: #e4dcc3;
+  box-shadow: 0 0 8px rgba(203, 179, 127, .7);
+}
+
+@keyframes killMarker {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.55) rotate(4deg);
+  }
+  42% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(.94) rotate(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(.72);
+  }
+}
+
+.score-hud.score-bump strong {
+  animation: scoreBump .3s cubic-bezier(.2, .84, .26, 1) both;
+}
+
+@keyframes scoreBump {
+  0% {
+    color: #fff1c9;
+    transform: scale(1.2) translateX(3px);
+    text-shadow: 0 0 13px rgba(194, 143, 72, .72);
+  }
+  100% {
+    color: rgba(225, 217, 193, .94);
+    transform: scale(1) translateX(0);
+    text-shadow: 0 2px 8px #000;
+  }
+}
+
+@media (pointer: coarse) {
+  .shot-pulse {
+    background:
+      radial-gradient(circle at center, rgba(255, 218, 154, .09), transparent 7%),
+      radial-gradient(circle at center, transparent 55%, rgba(112, 49, 32, .035) 100%);
   }
 }

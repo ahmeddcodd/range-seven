@@ -50,12 +50,17 @@ test("builds the complete static Nightfall Seven game shell", async () => {
   assert.match(html, /BEGIN THE NIGHT/);
   assert.match(html, /QUARANTINE DISTRICT/);
   assert.match(html, /id="viewport"/);
+  assert.match(html, /class="score-hud"/);
+  assert.doesNotMatch(html, /class="topbar"|id="level-value"|id="time-value"/);
+  assert.doesNotMatch(html, /id="accuracy-value"|id="streak-value"|id="health-panel"/);
   assert.match(html, /id="drill-announcement"/);
   assert.match(html, /CHOOSE WHAT KEEPS YOU ALIVE/);
   assert.match(html, /data-perk="ammo"/);
   assert.match(html, /data-perk="ghost"/);
   assert.match(html, /data-perk="heal"/);
-  assert.match(html, /HOLD TO AIM \+ FIRE/);
+  assert.match(html, /DRAG TO AIM · HOLD SHOOT TO FIRE/);
+  assert.match(html, /id="shoot-button"/);
+  assert.doesNotMatch(html, /Aim down sights|>ADS</);
   assert.match(html, /NO MOVEMENT/);
   assert.match(html, />BULLETS</);
   assert.doesNotMatch(html, />AKM</);
@@ -92,6 +97,19 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /import \* as THREE from "three"/);
   assert.match(source, /GLTFLoader/);
   assert.match(source, /fps-akm\.glb/);
+  assert.match(source, /const stableIdleClip = idleClip\.clone\(\)/);
+  assert.match(source, /!track\.name\.startsWith\("Root\."\)/);
+  assert.match(source, /aim\.set\(0, 0\)/);
+  assert.doesNotMatch(source, /let aimingLive|let adsBlend/);
+  assert.match(source, /function reloadMechanicalSound/);
+  assert.match(source, /const weaponEffectsBus = audio\.createGain\(\)/);
+  assert.match(source, /function duckMusic/);
+  assert.match(source, /duckMusic\(weapon\.reloadMs \+ 140, 0\.24\)/);
+  assert.match(source, /function hitConfirmAudio/);
+  assert.match(source, /pulseShotFlash\(\)/);
+  assert.match(source, /reloadSound\(0\.22, "magOut"\)/);
+  assert.match(source, /reloadSound\(0\.69, "seat"\)/);
+  assert.match(source, /reloadSound\(0\.9, "boltRelease"\)/);
   assert.match(source, /zombie\.glb/);
   assert.doesNotMatch(source, /enemy-punk\.glb|enemy-glock\.glb/);
   assert.match(source, /cloneSkeleton/);
@@ -114,9 +132,20 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /camera\.position\.set\(0, 1\.72, 11\.5\)/);
   assert.match(source, /setFiring\(true\)/);
   assert.match(source, /function onLookStart/);
-  assert.match(source, /engineRef\.current\?\.setAiming\(true\)/);
+  assert.match(source, /function onShootStart/);
+  assert.match(source, /shootButton\.addEventListener\("pointerdown", onShootStart\)/);
   assert.match(source, /engineRef\.current\?\.aimDelta\(dx, dy\)/);
   assert.match(source, /touchLayer\.addEventListener\("pointerdown", onLookStart\)/);
+  const lookStartHandler = source.slice(
+    source.indexOf("function onLookStart"),
+    source.indexOf("function onLookMove"),
+  );
+  assert.doesNotMatch(lookStartHandler, /setFiring|setAiming/);
+  const shootStartHandler = source.slice(
+    source.indexOf("function onShootStart"),
+    source.indexOf("function onShootEnd"),
+  );
+  assert.match(shootStartHandler, /setFiring\(true\)/);
   assert.match(source, /function announceDrillStart/);
   assert.match(source, /function showPerkSelection/);
   assert.match(source, /function choosePerk/);
@@ -179,6 +208,15 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /scream: "Scream"/);
   assert.match(source, /run: "Walk2"/);
   assert.match(source, /crawlRun: "Running_Crawl"/);
+  assert.match(source, /function prepareZombieClip/);
+  assert.match(source, /zombieStrideDistances\.set/);
+  assert.match(source, /values\[index \+ 2\] = anchorZ/);
+  assert.match(source, /action\.setDuration\(cycleDuration\)/);
+  assert.match(source, /function dampAngle/);
+  assert.match(source, /THREE\.MathUtils\.damp\(/);
+  assert.match(source, /elapsed - \(target\.lastMovedAt \?\? -1000\) > 180/);
+  assert.match(source, /target\.reactionUntil = gameNow\(\) \+ 155/);
+  assert.match(source, /const attackDuration = target\.motion === "crawler" \? 1080 : 840/);
   assert.match(source, /attack: "Attack"/);
   assert.match(source, /hit: "Hit_reaction"/);
   assert.match(source, /deathAlt: "Die2"/);
@@ -196,6 +234,15 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /rearSmoke/);
   assert.match(source, /createRadialGradient/);
   assert.match(source, /flickerLights/);
+  assert.match(source, /const renderProfile =/);
+  assert.match(source, /maxPixelRatio: mobileRendering/);
+  assert.match(source, /renderer\.shadowMap\.enabled = renderProfile\.shadows/);
+  assert.match(source, /practicalLightsUsed < renderProfile\.practicalLights/);
+  assert.match(source, /characterAnimationAccumulator >= 1 \/ 30/);
+  assert.match(source, /bloodParticleGeometry/);
+  assert.match(source, /object\.frustumCulled = true/);
+  assert.doesNotMatch(source, /const rimLight = new THREE\.DirectionalLight/);
+  assert.doesNotMatch(source, /const signLight = new THREE\.PointLight/);
   assert.match(source, /\[targetRoot, \.\.\.shotBlockers\]/);
   assert.doesNotMatch(
     source,
@@ -209,6 +256,14 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.doesNotMatch(packageJson, /react|next|vinext|wrangler|cloudflare|drizzle/i);
   assert.match(styles, /\[hidden\]\s*\{[\s\S]*display:\s*none\s*!important/);
   assert.match(styles, /@media \(pointer: coarse\)/);
+  assert.match(styles, /\.mobile-shoot-button/);
+  assert.doesNotMatch(styles, /\.crosshair\.aiming/);
+  assert.match(styles, /\.score-hud/);
+  assert.match(styles, /\.kill-feed \{[\s\S]*?right: auto;[\s\S]*?border: 0;/);
+  assert.match(source, /INFECTED DOWN\"} · \+\$\{points\}/);
+  assert.match(styles, /\.shot-pulse\.active/);
+  assert.match(styles, /\.hitmarker\.pulse\.kill/);
+  assert.match(styles, /\.score-hud\.score-bump strong/);
   assert.match(styles, /\.auto-move-indicator/);
   assert.match(styles, /data-youtube-paused="true"/);
   assert.match(viteConfig, /defineConfig/);

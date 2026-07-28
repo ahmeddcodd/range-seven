@@ -23,39 +23,12 @@
       <div id="viewport" class="viewport"></div>
       <div id="level-flash"></div>
       <div id="player-hit-flash"></div>
+      <div id="shot-pulse" aria-hidden="true"></div>
 
-      <header class="topbar" aria-label="Mission status">
-        <div class="brand">
-          <span class="brand-mark">VII</span>
-          <span>NIGHTFALL <b>SEVEN</b></span>
-        </div>
-        <div class="level-block">
-          <span>NIGHT</span>
-          <strong id="level-value">01</strong>
-          <i></i>
-          <small id="objective-value">FIRST KNOCK — 5 STILL MOVING</small>
-        </div>
-        <div id="timer" class="timer">
-          <small>UNTIL DAWN</small>
-          <strong id="time-value">00:45</strong>
-        </div>
-      </header>
-
-      <div class="survival-hud" aria-label="Survival status">
-        <aside class="score-panel" aria-label="Score">
-          <span>SCORE</span>
-          <strong id="score-value">000000</strong>
-          <em id="accuracy-value">100% ACCURACY</em>
-          <div class="streak"><i id="streak-meter"></i></div>
-          <small id="streak-value">BUILD STREAK</small>
-        </aside>
-
-        <aside id="health-panel" class="health-panel" aria-label="Health">
-          <span>LIFE</span>
-          <strong id="health-value">100</strong>
-          <div><i id="health-meter"></i></div>
-        </aside>
-      </div>
+      <aside id="score-hud" class="score-hud" aria-label="Score">
+        <span>SCORE</span>
+        <strong id="score-value">000000</strong>
+      </aside>
 
       <div class="compass" aria-hidden="true">
         <i></i><span>W</span><b>348</b><strong>N</strong><b>012</b><span>E</span>
@@ -147,12 +120,18 @@
       <div
         id="touch-layer"
         class="touch-layer"
-        aria-label="Tap and hold to fire, then drag to steer"
+        aria-label="Drag anywhere to aim; use the shoot button to fire"
         hidden
       >
         <div class="touch-steer-hint" aria-hidden="true">
-          <i></i><span>HOLD TO AIM + FIRE · DRAG TO STEER</span>
+          <i></i><span>DRAG TO AIM · HOLD SHOOT TO FIRE</span>
         </div>
+        <button
+          id="shoot-button"
+          class="mobile-shoot-button"
+          type="button"
+          aria-label="Shoot weapon"
+        ><i aria-hidden="true"></i><span>SHOOT</span></button>
       </div>
       <div id="auto-move-indicator" class="auto-move-indicator" hidden>
         <i></i><span>HOLD POSITION</span><i></i>

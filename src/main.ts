@@ -149,8 +149,11 @@ type TargetState = {
   nextAttackAt?: number;
   attackingUntil?: number;
   screamingUntil?: number;
+  reactionUntil?: number;
   deathVariant?: "death" | "deathAlt";
   blockedFor?: number;
+  facingYaw: number;
+  lastMovedAt?: number;
 };
 
 const WEAPONS: Weapon[] = [
@@ -422,7 +425,6 @@ const engineRef: {
     start: () => void;
     reload: () => void;
     setFiring: (value: boolean) => void;
-    setAiming: (value: boolean) => void;
     aimDelta: (dx: number, dy: number) => void;
     switchWeapon: (index: number) => void;
     choosePerk: (perk: PerkKey) => void;
@@ -453,7 +455,6 @@ let damageFlash = 0;
 let playerHitFlash = 0;
 let health = 100;
 let reloading = false;
-let aiming = false;
 let isMobile = false;
 let interfaceLocked = false;
 let youtubePaused = youtubePlayables.isPaused;
@@ -463,6 +464,7 @@ let cloudSaveTimer: number | null = null;
 const difficultyRef: { current: DifficultyKey } = { current: difficulty };
 const hapticsRef = { current: true };
 const lookPointer = { current: null as number | null };
+const shootPointer = { current: null as number | null };
 const lookLast = { current: { x: 0, y: 0 } };
 const feedTimer = {
   current: null as number | null,
@@ -598,8 +600,8 @@ function setInterfaceLocked(locked: boolean) {
   interfaceLocked = locked;
   if (locked) {
     lookPointer.current = null;
+    shootPointer.current = null;
     engineRef.current?.setFiring(false);
-    engineRef.current?.setAiming(false);
   }
   updateTouchLayer();
 }
@@ -649,27 +651,26 @@ function setGameOver(update: Updater<boolean>) {
 }
 
 function setScore(update: Updater<number>) {
+  const previousScore = score;
   score = resolveUpdate(score, update);
   cloudProfile.bestScore = Math.max(cloudProfile.bestScore, score);
   youtubePlayables.sendScore(cloudProfile.bestScore);
   element("score-value").textContent = score
     .toLocaleString("en-US")
     .padStart(6, "0");
+  if (score > previousScore) {
+    replayClass(element("score-hud"), "score-hud score-bump");
+  }
 }
 
 function setLevel(update: Updater<number>) {
   level = resolveUpdate(level, update);
   cloudProfile.highestDrill = Math.max(cloudProfile.highestDrill, level);
-  element("level-value").textContent = String(level).padStart(2, "0");
   updateWeaponRail();
 }
 
 function setStreak(update: Updater<number>) {
   streak = resolveUpdate(streak, update);
-  element("streak-value").textContent =
-    streak > 1 ? `x${streak} STREAK` : "BUILD STREAK";
-  element<HTMLElement>("streak-meter").style.width =
-    `${Math.min(streak * 10, 100)}%`;
 }
 
 function setBestStreak(update: Updater<number>) {
@@ -686,7 +687,6 @@ function setCombo(update: Updater<number>) {
 
 function setAccuracy(update: Updater<number>) {
   accuracy = resolveUpdate(accuracy, update);
-  element("accuracy-value").textContent = `${accuracy}% ACCURACY`;
 }
 
 function setDifficulty(update: Updater<DifficultyKey>) {
@@ -717,16 +717,10 @@ function setWeaponIndex(update: Updater<number>) {
 
 function setTime(update: Updater<number>) {
   time = resolveUpdate(time, update);
-  const wholeSeconds = Math.max(0, Math.ceil(time));
-  const minutes = Math.floor(wholeSeconds / 60);
-  const seconds = wholeSeconds % 60;
-  element("time-value").textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-  element("timer").classList.toggle("danger", time <= 10);
 }
 
 function setObjective(update: Updater<string>) {
   objective = resolveUpdate(objective, update);
-  element("objective-value").textContent = objective;
 }
 
 function setFeed(update: Updater<string>) {
@@ -736,9 +730,16 @@ function setFeed(update: Updater<string>) {
   target.classList.toggle("visible", Boolean(feed));
 }
 
-function setHitPulse(update: Updater<number>) {
+function setHitPulse(
+  update: Updater<number>,
+  kind: "body" | "head" | "kill" = "body",
+) {
   hitPulse = resolveUpdate(hitPulse, update);
-  replayClass(element("hitmarker"), "hitmarker pulse");
+  replayClass(element("hitmarker"), `hitmarker pulse ${kind}`);
+}
+
+function pulseShotFlash() {
+  replayClass(element("shot-pulse"), "shot-pulse active");
 }
 
 function setDamageFlash(update: Updater<number>) {
@@ -753,9 +754,6 @@ function setPlayerHitFlash(update: Updater<number>) {
 
 function setHealth(update: Updater<number>) {
   health = resolveUpdate(health, update);
-  element("health-value").textContent = String(health).padStart(3, "0");
-  element<HTMLElement>("health-meter").style.width = `${health}%`;
-  element("health-panel").classList.toggle("danger", health <= 30);
 }
 
 function setReloading(update: Updater<boolean>) {
@@ -765,15 +763,10 @@ function setReloading(update: Updater<boolean>) {
   button.textContent = reloading ? "RELOADING" : "R  RELOAD";
 }
 
-function setAiming(update: Updater<boolean>) {
-  aiming = resolveUpdate(aiming, update);
-  element("crosshair").classList.toggle("aiming", aiming);
-}
-
 function setIsMobile(update: Updater<boolean>) {
   isMobile = resolveUpdate(isMobile, update);
-  element("aim-help").textContent = isMobile ? "DRAG TO STEER" : "MOVE MOUSE";
-  element("fire-help").textContent = isMobile ? "HOLD TO AIM + FIRE" : "LEFT CLICK";
+  element("aim-help").textContent = isMobile ? "DRAG TO AIM" : "MOVE MOUSE";
+  element("fire-help").textContent = isMobile ? "HOLD SHOOT" : "LEFT CLICK";
   element("move-help").textContent = "NO MOVEMENT";
   updateTouchLayer();
 }
@@ -789,6 +782,27 @@ const onPointerModeChange = (event: MediaQueryListEvent) =>
   setIsMobile(event.matches);
 setIsMobile(coarsePointerQuery.matches);
 coarsePointerQuery.addEventListener("change", onPointerModeChange);
+const performanceNavigator = navigator as Navigator & {
+  deviceMemory?: number;
+  connection?: { saveData?: boolean };
+};
+const mobileRendering = coarsePointerQuery.matches;
+const constrainedRendering =
+  performanceNavigator.connection?.saveData === true ||
+  (mobileRendering &&
+    ((performanceNavigator.deviceMemory ?? 4) <= 4 ||
+      (navigator.hardwareConcurrency || 4) <= 4));
+const renderProfile = {
+  maxPixelRatio: mobileRendering ? (constrainedRendering ? 0.95 : 1.15) : 1.5,
+  minPixelRatio: mobileRendering ? 0.72 : 1,
+  shadows: !mobileRendering,
+  shadowMapSize: 768,
+  practicalLights: mobileRendering ? 1 : 2,
+  smokeWisps: constrainedRendering ? 3 : mobileRendering ? 5 : 8,
+  rearSmoke: constrainedRendering ? 8 : mobileRendering ? 12 : 18,
+  dustCount: constrainedRendering ? 90 : mobileRendering ? 150 : 260,
+  hitParticles: constrainedRendering ? 8 : mobileRendering ? 11 : 17,
+};
 const removeYouTubePauseListener = youtubePlayables.onPause(() => {
   requestCloudSave(true);
   youtubePaused = true;
@@ -820,35 +834,32 @@ const mount = element<HTMLDivElement>("viewport");
     camera.rotation.order = "YXZ";
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: !mobileRendering,
       powerPreference: "high-performance",
+      alpha: false,
+      stencil: false,
     });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    let renderPixelRatio = Math.min(devicePixelRatio, renderProfile.maxPixelRatio);
+    renderer.setPixelRatio(renderPixelRatio);
     renderer.setSize(mount.clientWidth, mount.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.22;
-    renderer.shadowMap.enabled = true;
+    renderer.toneMappingExposure = 1.16;
+    renderer.shadowMap.enabled = renderProfile.shadows;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.domElement.setAttribute("aria-label", "Three-dimensional zombie survival street");
     mount.appendChild(renderer.domElement);
 
-    const hemi = new THREE.HemisphereLight(0x506f78, 0x15100c, 1.12);
+    const hemi = new THREE.HemisphereLight(0x506f78, 0x15100c, 1.18);
     scene.add(hemi);
-    const moonLight = new THREE.DirectionalLight(0x86aabd, 3.1);
+    const moonLight = new THREE.DirectionalLight(0x86aabd, 2.65);
     moonLight.position.set(-18, 26, -8);
-    moonLight.castShadow = true;
-    moonLight.shadow.mapSize.set(1024, 1024);
-    moonLight.shadow.camera.left = -24;
-    moonLight.shadow.camera.right = 24;
-    moonLight.shadow.camera.top = 28;
-    moonLight.shadow.camera.bottom = -14;
-    moonLight.shadow.camera.far = 110;
+    moonLight.castShadow = false;
     scene.add(moonLight);
 
     const survivorLight = new THREE.SpotLight(
       0xc4ddd6,
-      245,
+      225,
       82,
       Math.PI * 0.23,
       0.62,
@@ -856,13 +867,15 @@ const mount = element<HTMLDivElement>("viewport");
     );
     survivorLight.position.set(0, 5.8, 10.5);
     survivorLight.target.position.set(0, 1.1, -34);
-    survivorLight.castShadow = true;
-    survivorLight.shadow.mapSize.set(1024, 1024);
+    survivorLight.castShadow = renderProfile.shadows;
+    survivorLight.shadow.mapSize.set(
+      renderProfile.shadowMapSize,
+      renderProfile.shadowMapSize,
+    );
+    survivorLight.shadow.camera.near = 1.5;
+    survivorLight.shadow.camera.far = 68;
+    survivorLight.shadow.bias = -0.00045;
     scene.add(survivorLight, survivorLight.target);
-
-    const rimLight = new THREE.DirectionalLight(0x3d6b73, 1.35);
-    rimLight.position.set(16, 11, 9);
-    scene.add(rimLight);
 
     const moonDisc = new THREE.Mesh(
       new THREE.CircleGeometry(4.2, 28),
@@ -935,6 +948,48 @@ const mount = element<HTMLDivElement>("viewport");
     brickTexture.colorSpace = THREE.SRGBColorSpace;
     brickTexture.anisotropy = floorTexture.anisotropy;
 
+    const crateCanvas = document.createElement("canvas");
+    crateCanvas.width = 256;
+    crateCanvas.height = 256;
+    const crateContext = crateCanvas.getContext("2d")!;
+    const crateGradient = crateContext.createLinearGradient(0, 0, 256, 256);
+    crateGradient.addColorStop(0, "#6d4b2f");
+    crateGradient.addColorStop(0.5, "#4c321f");
+    crateGradient.addColorStop(1, "#2d2119");
+    crateContext.fillStyle = crateGradient;
+    crateContext.fillRect(0, 0, 256, 256);
+    for (let plank = 0; plank < 8; plank++) {
+      const y = plank * 32;
+      crateContext.fillStyle = plank % 2 === 0
+        ? "rgba(179,125,72,.1)"
+        : "rgba(15,9,6,.13)";
+      crateContext.fillRect(0, y, 256, 29);
+      crateContext.fillStyle = "rgba(10,7,5,.72)";
+      crateContext.fillRect(0, y + 29, 256, 3);
+    }
+    for (let grain = 0; grain < 95; grain++) {
+      const y = Math.random() * 256;
+      const length = 18 + Math.random() * 76;
+      crateContext.strokeStyle = `rgba(20,12,8,${0.12 + Math.random() * 0.18})`;
+      crateContext.lineWidth = 0.6 + Math.random() * 1.4;
+      crateContext.beginPath();
+      crateContext.moveTo(Math.random() * 256, y);
+      crateContext.lineTo(Math.random() * 256 + length, y + (Math.random() - 0.5) * 4);
+      crateContext.stroke();
+    }
+    for (const x of [14, 242]) {
+      for (let y = 15; y < 256; y += 32) {
+        crateContext.fillStyle = "#17120e";
+        crateContext.beginPath();
+        crateContext.arc(x, y, 2.2, 0, Math.PI * 2);
+        crateContext.fill();
+      }
+    }
+    const crateTexture = new THREE.CanvasTexture(crateCanvas);
+    crateTexture.wrapS = crateTexture.wrapT = THREE.RepeatWrapping;
+    crateTexture.colorSpace = THREE.SRGBColorSpace;
+    crateTexture.anisotropy = floorTexture.anisotropy;
+
     const asphalt = new THREE.MeshStandardMaterial({
       color: 0x2a302e,
       map: floorTexture,
@@ -954,25 +1009,40 @@ const mount = element<HTMLDivElement>("viewport");
     });
     const steel = new THREE.MeshStandardMaterial({
       color: 0x12191a,
-      roughness: 0.5,
-      metalness: 0.72,
+      roughness: 0.82,
+      metalness: 0.2,
+      envMapIntensity: 0,
     });
     const rust = new THREE.MeshStandardMaterial({
       color: 0x3e2218,
-      roughness: 0.88,
-      metalness: 0.28,
+      roughness: 0.96,
+      metalness: 0.04,
+      envMapIntensity: 0,
+    });
+    const crateWood = new THREE.MeshStandardMaterial({
+      color: 0x8d6843,
+      map: crateTexture,
+      roughness: 0.96,
+      metalness: 0.01,
+    });
+    const crateEdge = new THREE.MeshStandardMaterial({
+      color: 0x302117,
+      roughness: 0.91,
+      metalness: 0.03,
     });
     const deadGlass = new THREE.MeshStandardMaterial({
       color: 0x172024,
-      roughness: 0.28,
-      metalness: 0.38,
+      roughness: 0.78,
+      metalness: 0.02,
+      envMapIntensity: 0,
     });
     const windowGlow = new THREE.MeshStandardMaterial({
       color: 0x5c3018,
       emissive: 0xff7a30,
-      emissiveIntensity: 3.1,
-      roughness: 0.35,
-      metalness: 0.08,
+      emissiveIntensity: 2.35,
+      roughness: 0.88,
+      metalness: 0,
+      envMapIntensity: 0,
     });
     const redGlow = new THREE.MeshBasicMaterial({ color: 0xff2f25 });
 
@@ -1011,7 +1081,7 @@ const mount = element<HTMLDivElement>("viewport");
         [x, height / 2 - 0.02, z],
         brick,
         0.09,
-        true,
+        false,
       );
       building.rotation.y = side * 0.006;
       roundedBox(
@@ -1027,7 +1097,7 @@ const mount = element<HTMLDivElement>("viewport");
         for (let column = 0; column < columns; column++) {
           const lit = (story * 7 + column * 3 + litPattern) % 5 === 0;
           const windowMaterial = lit ? windowGlow : deadGlass;
-          const window = roundedBox(
+          const window = box(
             world,
             [0.09, 1.05, 1.25],
             [
@@ -1036,17 +1106,8 @@ const mount = element<HTMLDivElement>("viewport");
               z - depth * 0.36 + column * (depth * 0.72) / Math.max(1, columns - 1),
             ],
             windowMaterial,
-            0.04,
           );
           window.rotation.y = side > 0 ? 0 : Math.PI;
-          if (lit && (story + column) % 2 === 0) {
-            const light = new THREE.PointLight(0xff7138, 38, 13, 2.05);
-            light.position.set(side * 15.8, 1.55 + story * 2.25, window.position.z);
-            light.userData.baseIntensity = 30 + Math.random() * 12;
-            light.userData.phase = Math.random() * 20;
-            flickerLights.push(light);
-            world.add(light);
-          }
         }
       }
     }
@@ -1074,13 +1135,7 @@ const mount = element<HTMLDivElement>("viewport");
     quarantineSign.position.set(0, 5.2, -89.65);
     quarantineSign.scale.set(7.4, 1.65, 1);
     world.add(quarantineSign);
-    const signLight = new THREE.PointLight(0xff2f25, 70, 19, 2);
-    signLight.position.set(0, 5.2, -86);
-    signLight.userData.baseIntensity = 62;
-    signLight.userData.phase = 2.4;
-    flickerLights.push(signLight);
-    world.add(signLight);
-
+    let practicalLightsUsed = 0;
     function addStreetLamp(x: number, z: number, working: boolean) {
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.13, 5.4, 8), steel);
       pole.position.set(x, 2.7, z);
@@ -1094,13 +1149,14 @@ const mount = element<HTMLDivElement>("viewport");
       lamp.rotation.z = Math.PI / 2;
       lamp.position.set(x + Math.sign(x) * -0.98, 5.14, z);
       world.add(pole, lamp);
-      if (working) {
-        const light = new THREE.PointLight(0xffb267, 86, 24, 1.85);
+      if (working && practicalLightsUsed < renderProfile.practicalLights) {
+        const light = new THREE.PointLight(0xffa65c, 58, 17, 2.1);
         light.position.copy(lamp.position);
-        light.userData.baseIntensity = 72;
+        light.userData.baseIntensity = 48;
         light.userData.phase = Math.random() * 16;
         flickerLights.push(light);
         world.add(light);
+        practicalLightsUsed++;
       }
     }
     for (const [x, z, working] of [
@@ -1128,7 +1184,93 @@ const mount = element<HTMLDivElement>("viewport");
       }
       obstacleBoxes.push({ x, z, halfW: 1.9 * scale, halfD: 1.25 * scale });
     }
-    addWreck(-9.5, -8, 0.14, 0.92);
+
+    function addBrokenCrates(x: number, z: number, rotation: number, scale = 1) {
+      const pile = new THREE.Group();
+      pile.position.set(x, 0, z);
+      pile.rotation.y = rotation;
+      world.add(pile);
+
+      const addCrate = (
+        cx: number,
+        cy: number,
+        cz: number,
+        crateScale: number,
+        turn = 0,
+        broken = false,
+      ) => {
+        const crate = new THREE.Group();
+        crate.position.set(cx, cy, cz);
+        crate.rotation.y = turn;
+        crate.rotation.z = broken ? -0.055 : 0;
+        pile.add(crate);
+        const width = 1.72 * crateScale;
+        const height = 1.18 * crateScale;
+        const depth = 1.28 * crateScale;
+        for (const faceZ of [-1, 1]) {
+          for (let row = 0; row < 4; row++) {
+            if (broken && faceZ === 1 && row === 3) continue;
+            const slat = roundedBox(
+              crate,
+              [width, height * 0.205, 0.09 * crateScale],
+              [0, -height * 0.37 + row * height * 0.25, faceZ * depth * 0.47],
+              crateWood,
+              0.022 * crateScale,
+              true,
+            );
+            if (broken && faceZ === 1 && row === 2) slat.rotation.z = 0.08;
+          }
+        }
+        for (const faceX of [-1, 1]) {
+          for (let row = 0; row < 4; row++) {
+            roundedBox(
+              crate,
+              [0.09 * crateScale, height * 0.205, depth * 0.9],
+              [faceX * width * 0.47, -height * 0.37 + row * height * 0.25, 0],
+              crateWood,
+              0.022 * crateScale,
+              true,
+            );
+          }
+        }
+        for (const sx of [-1, 1]) {
+          for (const sz of [-1, 1]) {
+            roundedBox(
+              crate,
+              [0.14 * crateScale, height * 1.08, 0.14 * crateScale],
+              [sx * width * 0.43, 0, sz * depth * 0.43],
+              crateEdge,
+              0.025 * crateScale,
+              true,
+            );
+          }
+        }
+      };
+
+      addCrate(-0.72 * scale, 0.6 * scale, 0, scale, -0.04, false);
+      addCrate(0.72 * scale, 0.56 * scale, 0.08 * scale, scale * 0.92, 0.08, true);
+      addCrate(-0.28 * scale, 1.64 * scale, 0.04 * scale, scale * 0.78, 0.13, true);
+
+      const scatteredPlanks = [
+        [-1.8, 0.11, 0.95, 0.28, 0.16],
+        [1.72, 0.09, 0.92, -0.38, -0.09],
+        [0.82, 0.13, -1.02, 0.46, 0.12],
+      ] as const;
+      for (const [px, py, pz, yaw, roll] of scatteredPlanks) {
+        const plank = roundedBox(
+          pile,
+          [1.28 * scale, 0.12 * scale, 0.24 * scale],
+          [px * scale, py * scale, pz * scale],
+          crateWood,
+          0.02 * scale,
+          true,
+        );
+        plank.rotation.set(roll, yaw, roll * 0.5);
+      }
+      obstacleBoxes.push({ x, z, halfW: 2.2 * scale, halfD: 1.45 * scale });
+    }
+
+    addBrokenCrates(-9.5, -8, 0.14, 0.92);
     addWreck(9.4, -31, -0.22, 1.05);
     addWreck(-9.8, -57, 0.28, 1);
 
@@ -1140,7 +1282,7 @@ const mount = element<HTMLDivElement>("viewport");
       obstacleBoxes.push({ x, z, halfW: 1.35, halfD: 1.05 });
     }
 
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < renderProfile.smokeWisps; i++) {
       const wisp = new THREE.Mesh(
         new THREE.IcosahedronGeometry(1, 2),
         new THREE.MeshBasicMaterial({
@@ -1176,7 +1318,7 @@ const mount = element<HTMLDivElement>("viewport");
     }
     const smokeTexture = new THREE.CanvasTexture(smokeCanvas);
     smokeTexture.colorSpace = THREE.SRGBColorSpace;
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < renderProfile.rearSmoke; i++) {
       const baseOpacity = 0.16 + (i % 4) * 0.028;
       const material = new THREE.SpriteMaterial({
         map: smokeTexture,
@@ -1201,8 +1343,8 @@ const mount = element<HTMLDivElement>("viewport");
       world.add(smoke);
     }
 
-    const dustPositions = new Float32Array(260 * 3);
-    for (let i = 0; i < 260; i++) {
+    const dustPositions = new Float32Array(renderProfile.dustCount * 3);
+    for (let i = 0; i < renderProfile.dustCount; i++) {
       dustPositions[i * 3] = (Math.random() - 0.5) * 36;
       dustPositions[i * 3 + 1] = 0.15 + Math.random() * 5.6;
       dustPositions[i * 3 + 2] = 12 - Math.random() * 106;
@@ -1245,7 +1387,37 @@ const mount = element<HTMLDivElement>("viewport");
     let engineDisposed = false;
     let zombieTemplate: THREE.Object3D | null = null;
     let zombieClips: THREE.AnimationClip[] = [];
+    const zombieStrideDistances = new Map<string, number>();
     let enemyAssetsReady = false;
+
+    function prepareZombieClip(source: THREE.AnimationClip) {
+      const clip = source.clone();
+      const isLocomotion = ["Walk", "Walk2", "Crawl", "Running_Crawl"].some(
+        (name) => source.name.endsWith(`|${name}`),
+      );
+      if (!isLocomotion) return clip;
+      const hipsTrack = clip.tracks.find(
+        (track) =>
+          track.name.endsWith("mixamorigHips.position") &&
+          track instanceof THREE.VectorKeyframeTrack,
+      ) as THREE.VectorKeyframeTrack | undefined;
+      if (!hipsTrack || hipsTrack.values.length < 6) return clip;
+      const values = hipsTrack.values;
+      const last = values.length - 3;
+      const stride = Math.hypot(
+        values[last] - values[0],
+        values[last + 2] - values[2],
+      );
+      zombieStrideDistances.set(source.name, Math.max(0.01, stride));
+      const anchorX = values[0];
+      const anchorZ = values[2];
+      for (let index = 0; index < values.length; index += 3) {
+        values[index] = anchorX;
+        values[index + 2] = anchorZ;
+      }
+      clip.resetDuration();
+      return clip;
+    }
 
     function updateEnemyAssetState() {
       enemyAssetsReady = Boolean(zombieTemplate && zombieClips.length);
@@ -1259,13 +1431,24 @@ const mount = element<HTMLDivElement>("viewport");
         if (engineDisposed) return;
         gltf.scene.traverse((object) => {
           if (object instanceof THREE.Mesh) {
-            object.frustumCulled = false;
-            object.castShadow = true;
-            object.receiveShadow = true;
+            object.frustumCulled = true;
+            object.castShadow = renderProfile.shadows;
+            object.receiveShadow = renderProfile.shadows;
+            const materials = Array.isArray(object.material)
+              ? object.material
+              : [object.material];
+            for (const material of materials) {
+              if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+              material.emissive.setHex(0x10191a);
+              material.emissiveIntensity = 0.32;
+              material.roughness = Math.max(material.roughness, 0.78);
+              material.metalness = Math.min(material.metalness, 0.12);
+              material.envMapIntensity = 0;
+            }
           }
         });
         zombieTemplate = gltf.scene;
-        zombieClips = gltf.animations;
+        zombieClips = gltf.animations.map(prepareZombieClip);
         updateEnemyAssetState();
       },
       undefined,
@@ -1293,22 +1476,10 @@ const mount = element<HTMLDivElement>("viewport");
       character.scale.setScalar(variantScale);
       character.traverse((object) => {
         if (!(object instanceof THREE.Mesh)) return;
-        object.frustumCulled = false;
-        object.castShadow = true;
-        object.receiveShadow = true;
+        object.frustumCulled = true;
+        object.castShadow = renderProfile.shadows;
+        object.receiveShadow = renderProfile.shadows;
         object.userData = { targetId: id, zone: "torso" };
-        object.material = Array.isArray(object.material)
-          ? object.material.map((material) => material.clone())
-          : object.material.clone();
-        const materials = Array.isArray(object.material)
-          ? object.material
-          : [object.material];
-        for (const material of materials) {
-          if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-          material.emissive.setHex(0x10191a);
-          material.emissiveIntensity = motion === "runner" ? 0.38 : 0.3;
-          material.roughness = Math.max(material.roughness, 0.68);
-        }
       });
       group.add(character);
 
@@ -1329,6 +1500,25 @@ const mount = element<HTMLDivElement>("viewport");
       torso.userData = { targetId: id, zone: "torso" };
       group.add(head, torso);
       targetRoot.add(group);
+
+      const difficultyConfig = DIFFICULTIES[difficultyRef.current];
+      const drill = levelConfig(levelLive);
+      const now = gameNow();
+      const speedMultiplier =
+        motion === "runner" ? 1.26 : motion === "crawler" ? 1.08 : motion === "brute" ? 0.7 : 0.86;
+      const speed =
+        drill.advanceSpeed *
+        speedMultiplier *
+        difficultyConfig.speedScale *
+        (0.92 + Math.random() * 0.16);
+      const hp =
+        motion === "brute"
+          ? 155 + levelLive * 18
+          : motion === "runner"
+            ? 68 + levelLive * 7
+            : motion === "crawler"
+              ? 58 + levelLive * 6
+              : 82 + levelLive * 8;
 
       const mixer = new THREE.AnimationMixer(character);
       const actions = new Map<string, THREE.AnimationAction>();
@@ -1354,27 +1544,31 @@ const mount = element<HTMLDivElement>("viewport");
           action.setLoop(THREE.LoopOnce, 1);
           action.clampWhenFinished = key === "death" || key === "deathAlt";
         }
+        if (["walk", "run", "crawl", "crawlRun"].includes(key)) {
+          const modelStride = zombieStrideDistances.get(clip.name) ?? 1;
+          const worldStride = modelStride * variantScale;
+          const cycleDuration = THREE.MathUtils.clamp(
+            worldStride / Math.max(0.1, speed),
+            key === "run" || key === "crawlRun" ? 0.38 : 0.58,
+            key === "walk" || key === "crawl" ? 1.45 : 0.92,
+          );
+          action.setDuration(cycleDuration);
+        } else {
+          const oneShotScale = ({
+            idle: 0.92,
+            scream: entry === "alley" ? 3.45 : 2.15,
+            attack: 3.2,
+            attackAlt: 3.1,
+            bite: 5.35,
+            hit: 3.8,
+            death: 1.2,
+            deathAlt: 1.34,
+          } as Record<string, number>)[key];
+          if (oneShotScale) action.setEffectiveTimeScale(oneShotScale);
+        }
         actions.set(key, action);
       }
-      actions.get("walk")?.setEffectiveTimeScale(1.04);
-      actions.get("run")?.setEffectiveTimeScale(1.72);
-      actions.get("crawl")?.setEffectiveTimeScale(1.2);
-      actions.get("crawlRun")?.setEffectiveTimeScale(1.44);
       actions.get("idle")?.play();
-
-      const difficultyConfig = DIFFICULTIES[difficultyRef.current];
-      const drill = levelConfig(levelLive);
-      const now = gameNow();
-      const speedMultiplier =
-        motion === "runner" ? 1.26 : motion === "crawler" ? 1.08 : motion === "brute" ? 0.7 : 0.86;
-      const hp =
-        motion === "brute"
-          ? 155 + levelLive * 18
-          : motion === "runner"
-            ? 68 + levelLive * 7
-            : motion === "crawler"
-              ? 58 + levelLive * 6
-              : 82 + levelLive * 8;
       targets.set(id, {
         id,
         group,
@@ -1388,7 +1582,7 @@ const mount = element<HTMLDivElement>("viewport");
         baseX: x,
         baseY: 0,
         baseZ: z,
-        speed: drill.advanceSpeed * speedMultiplier * difficultyConfig.speedScale * (0.92 + Math.random() * 0.16),
+        speed,
         range: 0,
         dead: false,
         mixer,
@@ -1397,6 +1591,7 @@ const mount = element<HTMLDivElement>("viewport");
         nextAttackAt: now + deploymentDelay + drill.firstShot,
         screamingUntil: now + deploymentDelay + (entry === "alley" ? 720 : 1250),
         flankDirection: id % 2 === 0 ? 1 : -1,
+        facingYaw: Math.atan2(camera.position.x - x, camera.position.z - z),
       });
     }
 
@@ -1407,23 +1602,24 @@ const mount = element<HTMLDivElement>("viewport");
       const current = target.activeAction
         ? target.actions.get(target.activeAction)
         : undefined;
-      current?.fadeOut(0.14);
-      next.reset().fadeIn(0.14).play();
+      current?.fadeOut(0.18);
+      next.reset().setEffectiveWeight(1).fadeIn(0.18).play();
       target.activeAction = key;
     }
 
     function playEnemyOneShot(target: TargetState, key: string) {
       const action = target.actions?.get(key);
       if (!action || target.dead) return;
-      if (["scream", "attack", "attackAlt", "bite"].includes(key)) {
+      if (["scream", "attack", "attackAlt", "bite", "hit"].includes(key)) {
         const current = target.activeAction
           ? target.actions?.get(target.activeAction)
           : undefined;
-        current?.fadeOut(0.08);
+        if (current !== action) current?.fadeOut(key === "hit" ? 0.06 : 0.1);
         target.activeAction = key;
       }
       action.stop();
-      action.reset().setEffectiveWeight(1).fadeIn(0.045).play();
+      action.reset().setEffectiveWeight(1).fadeIn(key === "hit" ? 0.04 : 0.07).play();
+      if (key === "hit") target.reactionUntil = gameNow() + 155;
     }
 
     const weaponRoot = new THREE.Group();
@@ -1459,9 +1655,12 @@ const mount = element<HTMLDivElement>("viewport");
       );
       muzzleFlash.position.copy(muzzle.position);
       muzzleFlash.rotation.x = -Math.PI / 2;
-      muzzleLight = new THREE.PointLight(0xff8f32, 0, 3.5);
-      muzzleLight.position.copy(muzzle.position);
-      weaponRoot.add(muzzleFlash, muzzleLight);
+      weaponRoot.add(muzzleFlash);
+      if (!mobileRendering) {
+        muzzleLight = new THREE.PointLight(0xff8f32, 0, 2.6, 2.3);
+        muzzleLight.position.copy(muzzle.position);
+        weaponRoot.add(muzzleLight);
+      }
     }
 
     function buildWeapon(index: number) {
@@ -1497,13 +1696,15 @@ const mount = element<HTMLDivElement>("viewport");
             : { receiver: 0.9, handguard: 0.9, barrel: 0.72, stock: 0.5 };
       const gunmetal = new THREE.MeshStandardMaterial({
         color: 0x1b272b,
-        roughness: 0.4,
-        metalness: 0.76,
+        roughness: 0.76,
+        metalness: 0.26,
+        envMapIntensity: 0,
       });
       const accent = new THREE.MeshStandardMaterial({
         color: w.color,
-        roughness: 0.62,
-        metalness: 0.28,
+        roughness: 0.82,
+        metalness: 0.08,
+        envMapIntensity: 0,
       });
       const skin = new THREE.MeshStandardMaterial({
         color: 0xb98262,
@@ -1707,9 +1908,18 @@ const mount = element<HTMLDivElement>("viewport");
         gltf.scene.position.sub(center);
         gltf.scene.traverse((object) => {
           if (object instanceof THREE.Mesh) {
-            object.frustumCulled = false;
+            object.frustumCulled = true;
             object.castShadow = false;
             object.receiveShadow = false;
+            const materials = Array.isArray(object.material)
+              ? object.material
+              : [object.material];
+            for (const material of materials) {
+              if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+              material.roughness = Math.max(material.roughness, 0.76);
+              material.metalness = Math.min(material.metalness, 0.3);
+              material.envMapIntensity = 0;
+            }
           }
         });
         importedWeaponRig = new THREE.Group();
@@ -1727,7 +1937,12 @@ const mount = element<HTMLDivElement>("viewport");
           clip.name.toLowerCase().includes("shoot"),
         );
         if (idleClip) {
-          importedIdleAction = importedWeaponMixer.clipAction(idleClip);
+          const stableIdleClip = idleClip.clone();
+          stableIdleClip.tracks = stableIdleClip.tracks.filter(
+            (track) => !track.name.startsWith("Root."),
+          );
+          stableIdleClip.resetDuration();
+          importedIdleAction = importedWeaponMixer.clipAction(stableIdleClip);
           importedIdleAction.setLoop(THREE.LoopRepeat, Infinity);
           importedIdleAction.play();
         }
@@ -1771,10 +1986,14 @@ const mount = element<HTMLDivElement>("viewport");
       life: number;
       maxLife: number;
     }[] = [];
+    const bloodParticleGeometry = new THREE.OctahedronGeometry(0.038, 0);
+    const sparkParticleGeometry = new THREE.OctahedronGeometry(0.032, 0);
+    const shellGeometry = new THREE.CylinderGeometry(0.025, 0.025, 0.085, 7);
     const shellMat = new THREE.MeshStandardMaterial({
       color: 0xd9aa49,
-      roughness: 0.35,
-      metalness: 0.9,
+      roughness: 0.78,
+      metalness: 0.18,
+      envMapIntensity: 0,
     });
     const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffc167 });
     const bloodMat = new THREE.MeshBasicMaterial({ color: 0x7d0b0b });
@@ -1788,6 +2007,8 @@ const mount = element<HTMLDivElement>("viewport");
     const musicReverb = audio.createConvolver();
     const musicReverbGain = audio.createGain();
     const musicBusGain = audio.createGain();
+    const weaponEffectsBus = audio.createGain();
+    const weaponEffectsCompressor = audio.createDynamicsCompressor();
     const creatureVocalBus = audio.createGain();
     const creatureVocalCompressor = audio.createDynamicsCompressor();
     const creatureVocalReverb = audio.createConvolver();
@@ -1805,6 +2026,13 @@ const mount = element<HTMLDivElement>("viewport");
     musicInput.connect(musicFilter).connect(musicCompressor).connect(musicBusGain);
     musicInput.connect(musicReverb).connect(musicReverbGain).connect(musicBusGain);
     musicBusGain.connect(masterAudioGain);
+    weaponEffectsBus.gain.value = 1.16;
+    weaponEffectsCompressor.threshold.value = -13;
+    weaponEffectsCompressor.knee.value = 9;
+    weaponEffectsCompressor.ratio.value = 5.5;
+    weaponEffectsCompressor.attack.value = 0.002;
+    weaponEffectsCompressor.release.value = 0.11;
+    weaponEffectsBus.connect(weaponEffectsCompressor).connect(masterAudioGain);
     creatureVocalBus.gain.value = 0.82;
     creatureVocalCompressor.threshold.value = -20;
     creatureVocalCompressor.knee.value = 16;
@@ -1833,6 +2061,7 @@ const mount = element<HTMLDivElement>("viewport");
     musicReverb.buffer = reverbImpulse;
     creatureVocalReverb.buffer = reverbImpulse;
     let noiseBuffer: AudioBuffer | null = null;
+    let reloadNoiseBuffer: AudioBuffer | null = null;
     let musicNoiseBuffer: AudioBuffer | null = null;
     let audioInitialized = false;
     let effectiveAudioEnabled = youtubePlayables.isAudioEnabled;
@@ -1841,6 +2070,13 @@ const mount = element<HTMLDivElement>("viewport");
     let nextScoreBeatAt = 0;
     let musicStep = 0;
     let musicLifted = false;
+    let musicDuckUntil = 0;
+    let musicDuckDepth = 1;
+
+    function duckMusic(durationMs: number, depth: number) {
+      musicDuckUntil = Math.max(musicDuckUntil, gameNow() + durationMs);
+      musicDuckDepth = Math.min(musicDuckDepth, depth);
+    }
 
     function setYouTubeAudioEnabled(enabled: boolean) {
       effectiveAudioEnabled = enabled;
@@ -1864,6 +2100,20 @@ const mount = element<HTMLDivElement>("viewport");
         const data = noiseBuffer.getChannelData(0);
         for (let i = 0; i < data.length; i++) {
           data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
+        }
+      }
+      if (!reloadNoiseBuffer) {
+        reloadNoiseBuffer = audio.createBuffer(
+          1,
+          Math.floor(audio.sampleRate * 0.42),
+          audio.sampleRate,
+        );
+        const data = reloadNoiseBuffer.getChannelData(0);
+        let mechanicalNoise = 0;
+        for (let i = 0; i < data.length; i++) {
+          const white = Math.random() * 2 - 1;
+          mechanicalNoise = mechanicalNoise * 0.28 + white * 0.72;
+          data[i] = mechanicalNoise * (0.76 + Math.random() * 0.24);
         }
       }
       if (!musicStarted) startHorrorMusic();
@@ -2177,8 +2427,14 @@ const mount = element<HTMLDivElement>("viewport");
         started && !gameOver
           ? (running ? 0.5 + proximity * 0.17 : 0.14) * quietValley * levelPressure
           : 0.045;
+      const duckActive = elapsed < musicDuckUntil;
+      if (!duckActive) musicDuckDepth = 1;
       musicBusGain.gain.setTargetAtTime(
-        THREE.MathUtils.clamp(targetLevel, 0.025, 0.68),
+        THREE.MathUtils.clamp(
+          targetLevel * (duckActive ? musicDuckDepth : 1),
+          0.018,
+          0.68,
+        ),
         audio.currentTime,
         lift ? 0.08 : 0.75,
       );
@@ -2214,28 +2470,59 @@ const mount = element<HTMLDivElement>("viewport");
     function shotAudio(index: number) {
       if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
       initAudio();
+      if (!noiseBuffer) return;
       const t = audio.currentTime;
-      const noise = audio.createBufferSource();
-      noise.buffer = noiseBuffer;
-      const filter = audio.createBiquadFilter();
-      filter.type = "bandpass";
-      filter.frequency.value = index === 1 ? 1350 : index === 2 ? 720 : 980;
-      filter.Q.value = 0.75;
-      const gain = audio.createGain();
-      gain.gain.setValueAtTime(0.42, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-      noise.connect(filter).connect(gain).connect(masterAudioGain);
-      noise.start(t);
+      duckMusic(115, 0.7);
+
+      const crack = audio.createBufferSource();
+      const crackFilter = audio.createBiquadFilter();
+      const crackGain = audio.createGain();
+      crack.buffer = noiseBuffer;
+      crack.playbackRate.value = index === 1 ? 1.28 : index === 2 ? 0.82 : 1;
+      crackFilter.type = "highpass";
+      crackFilter.frequency.value = index === 1 ? 1450 : index === 2 ? 760 : 1080;
+      crackGain.gain.setValueAtTime(index === 2 ? 0.62 : 0.54, t);
+      crackGain.gain.exponentialRampToValueAtTime(0.001, t + 0.052);
+      crack.connect(crackFilter).connect(crackGain).connect(weaponEffectsBus);
+      crack.start(t, 0, 0.06);
+
+      const body = audio.createBufferSource();
+      const bodyFilter = audio.createBiquadFilter();
+      const bodyGain = audio.createGain();
+      body.buffer = noiseBuffer;
+      body.playbackRate.value = index === 2 ? 0.58 : 0.78;
+      bodyFilter.type = "bandpass";
+      bodyFilter.frequency.value = index === 1 ? 780 : index === 2 ? 420 : 560;
+      bodyFilter.Q.value = 0.58;
+      bodyGain.gain.setValueAtTime(index === 2 ? 0.48 : 0.37, t);
+      bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+      body.connect(bodyFilter).connect(bodyGain).connect(weaponEffectsBus);
+      body.start(t, 0.008, 0.115);
+
       const thump = audio.createOscillator();
       const thumpGain = audio.createGain();
       thump.type = "triangle";
-      thump.frequency.setValueAtTime(index === 2 ? 92 : 122, t);
-      thump.frequency.exponentialRampToValueAtTime(48, t + 0.075);
-      thumpGain.gain.setValueAtTime(0.28, t);
-      thumpGain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
-      thump.connect(thumpGain).connect(masterAudioGain);
+      thump.frequency.setValueAtTime(index === 2 ? 104 : 132, t);
+      thump.frequency.exponentialRampToValueAtTime(42, t + 0.095);
+      thumpGain.gain.setValueAtTime(index === 2 ? 0.42 : 0.34, t);
+      thumpGain.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
+      thump.connect(thumpGain).connect(weaponEffectsBus);
       thump.start(t);
-      thump.stop(t + 0.1);
+      thump.stop(t + 0.12);
+
+      const tail = audio.createBufferSource();
+      const tailFilter = audio.createBiquadFilter();
+      const tailGain = audio.createGain();
+      tail.buffer = noiseBuffer;
+      tail.playbackRate.value = 0.52;
+      tailFilter.type = "bandpass";
+      tailFilter.frequency.value = 1180;
+      tailFilter.Q.value = 2.1;
+      tailGain.gain.setValueAtTime(0.001, t);
+      tailGain.gain.linearRampToValueAtTime(0.12, t + 0.038);
+      tailGain.gain.exponentialRampToValueAtTime(0.001, t + 0.19);
+      tail.connect(tailFilter).connect(tailGain).connect(weaponEffectsBus);
+      tail.start(t + 0.03, 0.012, 0.12);
     }
 
     function tone(frequency: number, duration: number, volume = 0.1) {
@@ -2251,6 +2538,137 @@ const mount = element<HTMLDivElement>("viewport");
       osc.connect(gain).connect(masterAudioGain);
       osc.start(t);
       osc.stop(t + duration);
+    }
+
+    type ReloadSoundStage =
+      | "release"
+      | "magOut"
+      | "magGrab"
+      | "magIn"
+      | "seat"
+      | "boltPull"
+      | "boltRelease";
+
+    function reloadMechanicalSound(stage: ReloadSoundStage) {
+      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
+      initAudio();
+      if (!reloadNoiseBuffer) return;
+      const now = audio.currentTime;
+      const stageProfile = {
+        release: [2850, 0.045, 0.3, 1.5],
+        magOut: [690, 0.22, 0.32, 0.72],
+        magGrab: [1260, 0.12, 0.2, 1.04],
+        magIn: [880, 0.2, 0.34, 0.82],
+        seat: [310, 0.095, 0.48, 1.02],
+        boltPull: [1480, 0.23, 0.35, 0.68],
+        boltRelease: [2450, 0.075, 0.52, 1.34],
+      }[stage] as [number, number, number, number];
+      const [frequency, duration, volume, playbackRate] = stageProfile;
+      const noise = audio.createBufferSource();
+      const filter = audio.createBiquadFilter();
+      const gain = audio.createGain();
+      const panner = audio.createStereoPanner();
+      noise.buffer = reloadNoiseBuffer;
+      noise.playbackRate.value = playbackRate;
+      filter.type = stage === "seat" ? "lowpass" : "bandpass";
+      filter.frequency.setValueAtTime(frequency, now);
+      filter.Q.value = stage === "boltPull" || stage === "magOut" ? 1.05 : 1.7;
+      if (stage === "boltPull") {
+        filter.frequency.exponentialRampToValueAtTime(620, now + duration);
+      } else if (stage === "magIn") {
+        filter.frequency.exponentialRampToValueAtTime(1550, now + duration);
+      }
+      panner.pan.value =
+        stage === "magOut" || stage === "magGrab"
+          ? -0.24
+          : stage === "boltPull" || stage === "boltRelease"
+            ? 0.22
+            : 0;
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(volume, now + 0.006);
+      if (duration > 0.1) {
+        gain.gain.setValueAtTime(volume * 0.72, now + duration * 0.52);
+      }
+      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      noise.connect(filter).connect(gain).connect(panner).connect(weaponEffectsBus);
+      noise.start(now, Math.random() * 0.035, duration);
+
+      const resonance = audio.createOscillator();
+      const resonanceGain = audio.createGain();
+      const resonanceFrequency =
+        stage === "seat"
+          ? 155
+          : stage === "boltRelease"
+            ? 760
+            : stage === "release"
+              ? 510
+              : stage === "magOut" || stage === "magIn"
+                ? 215
+                : 330;
+      resonance.type = "triangle";
+      resonance.frequency.setValueAtTime(resonanceFrequency, now);
+      resonance.frequency.exponentialRampToValueAtTime(
+        Math.max(72, resonanceFrequency * 0.38),
+        now + Math.min(duration, 0.095),
+      );
+      resonanceGain.gain.setValueAtTime(volume * 0.58, now);
+      resonanceGain.gain.exponentialRampToValueAtTime(
+        0.001,
+        now + Math.min(duration + 0.025, 0.16),
+      );
+      resonance
+        .connect(resonanceGain)
+        .connect(panner);
+      resonance.start(now);
+      resonance.stop(now + Math.min(duration + 0.03, 0.17));
+
+      if (stage === "release" || stage === "seat" || stage === "boltRelease") {
+        const snap = audio.createBufferSource();
+        const snapFilter = audio.createBiquadFilter();
+        const snapGain = audio.createGain();
+        snap.buffer = reloadNoiseBuffer;
+        snap.playbackRate.value = stage === "seat" ? 0.82 : 1.9;
+        snapFilter.type = stage === "seat" ? "bandpass" : "highpass";
+        snapFilter.frequency.value = stage === "seat" ? 420 : 1900;
+        snapFilter.Q.value = 0.8;
+        snapGain.gain.setValueAtTime(stage === "boltRelease" ? 0.52 : 0.38, now);
+        snapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+        snap.connect(snapFilter).connect(snapGain).connect(weaponEffectsBus);
+        snap.start(now, 0.008, 0.045);
+      }
+    }
+
+    function hitConfirmAudio(headshot: boolean, killed: boolean) {
+      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
+      initAudio();
+      if (!noiseBuffer) return;
+      const now = audio.currentTime;
+      const impact = audio.createBufferSource();
+      const impactFilter = audio.createBiquadFilter();
+      const impactGain = audio.createGain();
+      impact.buffer = noiseBuffer;
+      impact.playbackRate.value = killed ? 0.72 : headshot ? 1.4 : 1.05;
+      impactFilter.type = "bandpass";
+      impactFilter.frequency.value = headshot ? 2380 : killed ? 620 : 1180;
+      impactFilter.Q.value = headshot ? 2.2 : 0.9;
+      impactGain.gain.setValueAtTime(killed ? 0.3 : 0.2, now);
+      impactGain.gain.exponentialRampToValueAtTime(0.001, now + (killed ? 0.12 : 0.065));
+      impact.connect(impactFilter).connect(impactGain).connect(weaponEffectsBus);
+      impact.start(now, 0, killed ? 0.12 : 0.07);
+
+      const tick = audio.createOscillator();
+      const tickGain = audio.createGain();
+      tick.type = "triangle";
+      tick.frequency.setValueAtTime(headshot ? 1780 : killed ? 380 : 920, now);
+      tick.frequency.exponentialRampToValueAtTime(
+        headshot ? 880 : killed ? 94 : 540,
+        now + (killed ? 0.09 : 0.045),
+      );
+      tickGain.gain.setValueAtTime(headshot ? 0.12 : killed ? 0.19 : 0.08, now);
+      tickGain.gain.exponentialRampToValueAtTime(0.001, now + (killed ? 0.11 : 0.055));
+      tick.connect(tickGain).connect(weaponEffectsBus);
+      tick.start(now);
+      tick.stop(now + (killed ? 0.12 : 0.06));
     }
 
     let lastZombieVocalAt = -10;
@@ -2373,14 +2791,13 @@ const mount = element<HTMLDivElement>("viewport");
     let unlocked = 1;
     let lastShot = 0;
     let firing = false;
-    let aimingLive = false;
-    let adsBlend = 0;
     let reloadingLive = false;
     let reloadStarted = 0;
     let reloadToken = 0;
     let walkPhase = 0;
     let recoil = 0;
     let weaponKick = 0;
+    let shotRoll = 0;
     let yaw = 0;
     let pitch = -0.015;
     let pointerLockUnavailable = false;
@@ -2439,8 +2856,6 @@ const mount = element<HTMLDivElement>("viewport");
       const drill = levelConfig(levelLive);
       running = false;
       firing = false;
-      aimingLive = false;
-      setAiming(false);
       setInterfaceLocked(true);
       element("announcement-level").textContent = String(levelLive).padStart(2, "0");
       element("announcement-title").textContent = drill.title;
@@ -2477,8 +2892,6 @@ const mount = element<HTMLDivElement>("viewport");
       perkSelectionPending = true;
       running = false;
       firing = false;
-      aimingLive = false;
-      setAiming(false);
       setInterfaceLocked(true);
       element("drill-announcement").hidden = true;
       element("perk-eyebrow").textContent =
@@ -2531,12 +2944,13 @@ const mount = element<HTMLDivElement>("viewport");
     }
 
     function burst(position: THREE.Vector3, hit = false) {
-      const count = hit ? 17 : 5;
+      const count = hit ? renderProfile.hitParticles : mobileRendering ? 3 : 5;
       for (let i = 0; i < count; i++) {
         const mesh = new THREE.Mesh(
-          new THREE.OctahedronGeometry(0.025 + Math.random() * (hit ? 0.045 : 0.025), 0),
+          hit ? bloodParticleGeometry : sparkParticleGeometry,
           hit ? bloodMat : sparkMat,
         );
+        mesh.scale.setScalar(0.52 + Math.random() * (hit ? 0.5 : 0.55));
         mesh.position.copy(position);
         const velocity = new THREE.Vector3(
           (Math.random() - 0.5) * 2.6,
@@ -2602,8 +3016,6 @@ const mount = element<HTMLDivElement>("viewport");
       if (playerHealthLive <= 0) {
         running = false;
         firing = false;
-        aimingLive = false;
-        setAiming(false);
         setGameOver(true);
         document.exitPointerLock?.();
         showFeed("YOU JOINED THE HORDE");
@@ -2612,7 +3024,7 @@ const mount = element<HTMLDivElement>("viewport");
 
     function ejectShell() {
       const mesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.025, 0.025, 0.085, 7),
+        shellGeometry,
         shellMat,
       );
       const pos = new THREE.Vector3();
@@ -2650,10 +3062,8 @@ const mount = element<HTMLDivElement>("viewport");
       perkCounts.ammo = 0;
       perkCounts.ghost = 0;
       perkCounts.heal = 0;
-      aimingLive = false;
       reloadingLive = false;
       reloadToken++;
-      setAiming(false);
       setReloading(false);
       setScore(0);
       setStreak(0);
@@ -2706,10 +3116,8 @@ const mount = element<HTMLDivElement>("viewport");
       perkCounts.ghost = session.perks.ghost;
       perkCounts.heal = session.perks.heal;
       drillTransitionToken++;
-      aimingLive = false;
       reloadingLive = false;
       reloadToken++;
-      setAiming(false);
       setReloading(false);
       setScore(scoreLive);
       setStreak(streakLive);
@@ -2827,10 +3235,9 @@ const mount = element<HTMLDivElement>("viewport");
       const token = ++reloadToken;
       reloadStarted = gameNow();
       firing = false;
-      aimingLive = false;
-      setAiming(false);
       setReloading(true);
       showFeed("RELOADING");
+      duckMusic(weapon.reloadMs + 140, 0.24);
       if (
         currentWeapon === 0 &&
         importedWeaponReady &&
@@ -2840,18 +3247,20 @@ const mount = element<HTMLDivElement>("viewport");
         importedIdleAction?.fadeOut(0.06);
         importedReloadAction.reset().fadeIn(0.06).play();
       }
-      const reloadSound = (progress: number, frequency: number, volume: number) => {
+      const reloadSound = (progress: number, stage: ReloadSoundStage) => {
         gameTimeout(() => {
           if (token === reloadToken && reloadingLive) {
-            tone(frequency, 0.045, volume);
+            reloadMechanicalSound(stage);
           }
         }, weapon.reloadMs * progress);
       };
-      reloadSound(0.12, 165, 0.045);
-      reloadSound(0.31, 125, 0.055);
-      reloadSound(0.48, 205, 0.04);
-      reloadSound(0.69, 340, 0.065);
-      reloadSound(0.87, 475, 0.07);
+      reloadSound(0.11, "release");
+      reloadSound(0.22, "magOut");
+      reloadSound(0.42, "magGrab");
+      reloadSound(0.52, "magIn");
+      reloadSound(0.69, "seat");
+      reloadSound(0.81, "boltPull");
+      reloadSound(0.9, "boltRelease");
       gameTimeout(() => {
         if (token !== reloadToken || !reloadingLive) return;
         const needed = weapon.ammo - ammoLive;
@@ -2865,7 +3274,6 @@ const mount = element<HTMLDivElement>("viewport");
           importedReloadAction?.fadeOut(0.06);
           importedIdleAction?.reset().fadeIn(0.08).play();
         }
-        tone(560, 0.055, 0.045);
         requestCloudSave();
       }, weapon.reloadMs);
     }
@@ -2874,8 +3282,6 @@ const mount = element<HTMLDivElement>("viewport");
       if (levelLive >= LEVELS.length) {
         running = false;
         firing = false;
-        aimingLive = false;
-        setAiming(false);
         setInterfaceLocked(true);
         setObjective("DAWN REACHED");
         cloudProfile.completedRuns++;
@@ -2916,8 +3322,12 @@ const mount = element<HTMLDivElement>("viewport");
       const weapon = WEAPONS[currentWeapon];
       const multiplier = zone === "head" ? 2.5 : zone === "bullseye" ? 1.55 : 1;
       target.hp -= weapon.damage * multiplier;
-      setHitPulse((v) => v + 1);
-      tone(zone === "head" ? 1040 : 760, 0.045, 0.055);
+      const killed = target.hp <= 0;
+      setHitPulse(
+        (v) => v + 1,
+        killed ? "kill" : zone === "head" ? "head" : "body",
+      );
+      hitConfirmAudio(zone === "head", killed);
       burst(hit.point, true);
       const material = hit.object instanceof THREE.Mesh ? hit.object.material : null;
       const hitMaterials = Array.isArray(material) ? material : material ? [material] : [];
@@ -2927,7 +3337,7 @@ const mount = element<HTMLDivElement>("viewport");
         hitMaterial.emissive.setHex(0xff6a45);
         gameTimeout(() => hitMaterial.emissive.setHex(previous), 70);
       }
-      if (target.hp <= 0) {
+      if (killed) {
         const killTime = gameNow();
         target.dead = true;
         target.group.userData.fall = 0;
@@ -2947,6 +3357,9 @@ const mount = element<HTMLDivElement>("viewport");
           ),
           0.78,
         );
+        if (hapticsRef.current && navigator.vibrate) {
+          navigator.vibrate(zone === "head" ? [16, 18, 34] : [14, 20, 24]);
+        }
         burst(hit.point.clone().add(new THREE.Vector3(0, 0.04, 0)), true);
         streakLive++;
         levelKills++;
@@ -2988,9 +3401,9 @@ const mount = element<HTMLDivElement>("viewport");
         setBestStreak((best) => Math.max(best, streakLive));
         requestCloudSave();
         showFeed(
-          `${zone === "head" ? "SKULL CRUSHED" : "INFECTED DOWN"}  +${points}${
-            precisionTime ? "  +TIME" : ""
-          }${comboLive > 1 ? `  x${comboMultiplier.toFixed(2)}` : ""}`,
+          `${zone === "head" ? "SKULL CRUSHED" : "INFECTED DOWN"} · +${points}${
+            precisionTime ? " · TIME BONUS" : ""
+          }${comboLive > 1 ? ` · x${comboMultiplier.toFixed(2)}` : ""}`,
         );
         if (comboLive > 1) {
           gameTimeout(
@@ -3032,31 +3445,22 @@ const mount = element<HTMLDivElement>("viewport");
         importedShootAction.stop();
         importedShootAction
           .reset()
-          .setEffectiveWeight(aimingLive ? 0.42 : 1)
+          .setEffectiveWeight(1)
           .play();
       }
       shotAudio(currentWeapon);
+      pulseShotFlash();
       weaponKick = 1;
+      shotRoll = (Math.random() - 0.5) * (currentWeapon === 2 ? 0.014 : 0.009);
       recoil = Math.min(recoil + weapon.recoil * (0.78 + Math.random() * 0.42), 0.16);
-      yaw +=
-        (Math.random() - 0.5) *
-        weapon.recoil *
-        0.38 *
-        (aimingLive ? 0.08 : 1);
-      if (muzzleFlash && muzzleLight) {
+      if (muzzleFlash) {
         (muzzleFlash.material as THREE.MeshBasicMaterial).opacity = 1;
         muzzleFlash.scale.setScalar(0.85 + Math.random() * 0.8);
         muzzleFlash.rotation.z = Math.random() * Math.PI;
-        muzzleLight.intensity = 5;
       }
+      if (muzzleLight) muzzleLight.intensity = 3.2;
       ejectShell();
-      const spread =
-        weapon.spread *
-        (aimingLive ? 0.02 : 0.55);
-      aim.set(
-        (Math.random() - 0.5) * spread,
-        (Math.random() - 0.5) * spread,
-      );
+      aim.set(0, 0);
       raycaster.setFromCamera(aim, camera);
       const hits = raycaster.intersectObjects(
         [targetRoot, ...shotBlockers],
@@ -3142,6 +3546,19 @@ const mount = element<HTMLDivElement>("viewport");
             Math.hypot(x - other.baseX, z - other.baseZ) < 0.78,
         )
       );
+    }
+
+    function dampAngle(
+      current: number,
+      target: number,
+      smoothing: number,
+      dt: number,
+    ) {
+      const delta = Math.atan2(
+        Math.sin(target - current),
+        Math.cos(target - current),
+      );
+      return current + delta * (1 - Math.exp(-smoothing * dt));
     }
 
     function advanceEnemyTowardPlayer(
@@ -3230,11 +3647,6 @@ const mount = element<HTMLDivElement>("viewport");
       if (document.pointerLockElement !== renderer.domElement) {
         tryPointerLock();
       }
-      if (event.button === 2) {
-        aimingLive = true;
-        setAiming(true);
-        return;
-      }
       if (event.button !== 0) return;
       firing = true;
       shoot();
@@ -3243,10 +3655,6 @@ const mount = element<HTMLDivElement>("viewport");
 
     function onMouseUp(event: MouseEvent) {
       if (youtubePaused) return;
-      if (event.button === 2) {
-        aimingLive = false;
-        setAiming(false);
-      }
       if (event.button === 0) firing = false;
     }
 
@@ -3274,7 +3682,12 @@ const mount = element<HTMLDivElement>("viewport");
       camera.aspect = mount.clientWidth / mount.clientHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(mount.clientWidth, mount.clientHeight);
-      renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+      renderPixelRatio = Math.min(
+        renderPixelRatio,
+        devicePixelRatio,
+        renderProfile.maxPixelRatio,
+      );
+      renderer.setPixelRatio(renderPixelRatio);
     }
 
     document.addEventListener("mousemove", onMouseMove);
@@ -3286,6 +3699,9 @@ const mount = element<HTMLDivElement>("viewport");
     window.addEventListener("resize", onResize);
 
     let frame: number | null = null;
+    let qualitySampleTime = 0;
+    let qualitySampleFrames = 0;
+    let characterAnimationAccumulator = 0;
 
     engineRef.current = {
       start() {
@@ -3303,11 +3719,6 @@ const mount = element<HTMLDivElement>("viewport");
         firing = value;
         if (value) shoot();
       },
-      setAiming(value) {
-        if (youtubePaused) return;
-        aimingLive = value;
-        setAiming(value);
-      },
       aimDelta(dx, dy) {
         if (youtubePaused || !running) return;
         yaw -= dx * 0.0041;
@@ -3320,9 +3731,9 @@ const mount = element<HTMLDivElement>("viewport");
       restoreCloudSave,
       pauseFromYouTube() {
         firing = false;
-        aimingLive = false;
+        shootPointer.current = null;
+        lookPointer.current = null;
         keys.clear();
-        setAiming(false);
         navigator.vibrate?.(0);
         document.exitPointerLock?.();
         if (frame !== null) cancelAnimationFrame(frame);
@@ -3346,10 +3757,33 @@ const mount = element<HTMLDivElement>("viewport");
         return;
       }
       frame = requestAnimationFrame(animate);
-      const dt = Math.min(clock.getDelta(), 0.04);
+      const rawDt = clock.getDelta();
+      const dt = Math.min(rawDt, 0.04);
       const elapsed = gameNow();
       importedWeaponMixer?.update(dt);
       updateHorrorMusic(elapsed);
+
+      if (mobileRendering) {
+        qualitySampleTime += rawDt;
+        qualitySampleFrames++;
+        if (qualitySampleTime >= 1.8) {
+          const averageFrameTime = qualitySampleTime / qualitySampleFrames;
+          let nextPixelRatio = renderPixelRatio;
+          if (averageFrameTime > 0.0235) nextPixelRatio -= 0.1;
+          else if (averageFrameTime < 0.0172) nextPixelRatio += 0.05;
+          nextPixelRatio = THREE.MathUtils.clamp(
+            nextPixelRatio,
+            renderProfile.minPixelRatio,
+            Math.min(devicePixelRatio, renderProfile.maxPixelRatio),
+          );
+          if (Math.abs(nextPixelRatio - renderPixelRatio) >= 0.045) {
+            renderPixelRatio = nextPixelRatio;
+            renderer.setPixelRatio(renderPixelRatio);
+          }
+          qualitySampleTime = 0;
+          qualitySampleFrames = 0;
+        }
+      }
 
       if (running) {
         if (firing) shoot();
@@ -3365,8 +3799,6 @@ const mount = element<HTMLDivElement>("viewport");
           if (timeLive <= 0) {
             running = false;
             firing = false;
-            aimingLive = false;
-            setAiming(false);
             setGameOver(true);
             document.exitPointerLock?.();
             showFeed("SESSION COMPLETE");
@@ -3379,35 +3811,25 @@ const mount = element<HTMLDivElement>("viewport");
       walkPhase += dt * 1.45;
 
       recoil = THREE.MathUtils.lerp(recoil, 0, 1 - Math.pow(0.0001, dt));
+      shotRoll = THREE.MathUtils.lerp(shotRoll, 0, 1 - Math.pow(0.00002, dt));
       camera.rotation.y = yaw;
       camera.rotation.x = pitch + recoil;
-      adsBlend = THREE.MathUtils.lerp(
-        adsBlend,
-        aimingLive && !reloadingLive ? 1 : 0,
-        1 - Math.pow(0.000003, dt),
-      );
-      const targetFov = aimingLive ? (currentWeapon === 2 ? 47 : 55) : 68;
-      camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, 1 - Math.pow(0.00002, dt));
+      camera.rotation.z = shotRoll;
+      camera.fov = THREE.MathUtils.lerp(camera.fov, 68, 1 - Math.pow(0.00002, dt));
       camera.updateProjectionMatrix();
       weaponKick = THREE.MathUtils.lerp(weaponKick, 0, 1 - Math.pow(0.00004, dt));
       const importedAkActive = currentWeapon === 0 && importedWeaponReady;
       const hipWeaponX = importedAkActive ? 0.34 : 0.32;
       const hipWeaponY = importedAkActive ? -0.56 : -0.3;
       const hipWeaponZ = importedAkActive ? -1.3 : -1.48;
-      const adsWeaponY = importedAkActive
-        ? -0.34
-        : currentWeapon === 2
-          ? -0.39 * weaponVisualScale
-          : -0.405 * weaponVisualScale;
-      const adsWeaponZ = importedAkActive ? -1.58 : -1.6;
-      weaponRoot.position.x = THREE.MathUtils.lerp(hipWeaponX, 0, adsBlend);
+      const viewWeaponPitch = importedAkActive ? -0.018 : 0;
+      weaponRoot.position.x = hipWeaponX;
       weaponRoot.position.z =
-        THREE.MathUtils.lerp(hipWeaponZ, adsWeaponZ, adsBlend) +
-        weaponKick * 0.045;
+        hipWeaponZ + weaponKick * 0.045;
       weaponRoot.position.y =
-        THREE.MathUtils.lerp(hipWeaponY, adsWeaponY, adsBlend) -
+        hipWeaponY -
         weaponKick * 0.02 +
-        Math.sin(walkPhase) * 0.0035 * (1 - adsBlend);
+        Math.sin(walkPhase) * 0.0035;
       if (reloadingLive) {
         const reloadProgress = Math.min(
           1,
@@ -3429,7 +3851,7 @@ const mount = element<HTMLDivElement>("viewport");
           phase(0.82, 0.875) * (1 - phase(0.875, 0.93));
 
         weaponRoot.rotation.z = -pose * 0.36;
-        weaponRoot.rotation.x = pose * 0.12;
+        weaponRoot.rotation.x = viewWeaponPitch + pose * 0.12;
         weaponRoot.rotation.y = pose * 0.08;
         weaponRoot.position.x += pose * 0.045;
         weaponRoot.position.y -= pose * 0.05;
@@ -3502,8 +3924,8 @@ const mount = element<HTMLDivElement>("viewport");
         }
       } else {
         weaponRoot.rotation.z =
-          Math.sin(walkPhase * 0.5) * 0.012 * (1 - adsBlend);
-        weaponRoot.rotation.x = 0;
+          Math.sin(walkPhase * 0.5) * 0.012;
+        weaponRoot.rotation.x = viewWeaponPitch - weaponKick * 0.05;
         weaponRoot.rotation.y = 0;
         if (
           weaponMagazine &&
@@ -3524,15 +3946,25 @@ const mount = element<HTMLDivElement>("viewport");
         }
       }
 
-      if (muzzleFlash && muzzleLight) {
+      if (muzzleFlash) {
         const mat = muzzleFlash.material as THREE.MeshBasicMaterial;
         mat.opacity = Math.max(0, mat.opacity - dt * 28);
+      }
+      if (muzzleLight) {
         muzzleLight.intensity = Math.max(0, muzzleLight.intensity - dt * 90);
       }
 
+      characterAnimationAccumulator += dt;
+      const updateCharacterAnimations =
+        !mobileRendering || characterAnimationAccumulator >= 1 / 30;
+      const characterAnimationStep = characterAnimationAccumulator;
+      if (updateCharacterAnimations) characterAnimationAccumulator = 0;
+
       for (const target of targets.values()) {
         const age = elapsed - target.bornAt;
-        target.mixer?.update(dt);
+        if (updateCharacterAnimations) {
+          target.mixer?.update(characterAnimationStep);
+        }
         if (age < 0) {
           target.group.visible = false;
           continue;
@@ -3551,20 +3983,36 @@ const mount = element<HTMLDivElement>("viewport");
         const alleyEntry = target.group.userData.entry === "alley";
         const spawnProgress = THREE.MathUtils.clamp(age / (alleyEntry ? 360 : 620), 0, 1);
         const spawnEase = 1 - Math.pow(1 - spawnProgress, 3);
-        target.group.position.set(
-          target.baseX +
-            (alleyEntry ? Math.sign(target.baseX || 1) * (1 - spawnEase) * 2.35 : 0),
-          target.baseY - (1 - spawnEase) * (alleyEntry ? 0.24 : 1.45),
-          target.baseZ,
-        );
-        target.group.rotation.set(
-          0,
-          Math.atan2(
-            camera.position.x - target.group.position.x,
-            camera.position.z - target.group.position.z,
-          ),
-          0,
-        );
+        if (spawnProgress < 1) {
+          target.group.position.set(
+            target.baseX +
+              (alleyEntry
+                ? Math.sign(target.baseX || 1) * (1 - spawnEase) * 2.35
+                : 0),
+            target.baseY - (1 - spawnEase) * (alleyEntry ? 0.24 : 1.45),
+            target.baseZ,
+          );
+        } else {
+          target.group.position.x = THREE.MathUtils.damp(
+            target.group.position.x,
+            target.baseX,
+            18,
+            dt,
+          );
+          target.group.position.y = THREE.MathUtils.damp(
+            target.group.position.y,
+            target.baseY,
+            20,
+            dt,
+          );
+          target.group.position.z = THREE.MathUtils.damp(
+            target.group.position.z,
+            target.baseZ,
+            18,
+            dt,
+          );
+        }
+        target.group.rotation.set(0, target.facingYaw, 0);
 
         if (!target.group.userData.screamed) {
           target.group.userData.screamed = true;
@@ -3594,9 +4042,24 @@ const mount = element<HTMLDivElement>("viewport");
           camera.position.x - target.baseX,
           camera.position.z - target.baseZ,
         );
-        if (target.attackingUntil && elapsed < target.attackingUntil) continue;
+        const playerFacingYaw = Math.atan2(
+          camera.position.x - target.baseX,
+          camera.position.z - target.baseZ,
+        );
+        if (target.reactionUntil && elapsed < target.reactionUntil) {
+          target.facingYaw = dampAngle(target.facingYaw, playerFacingYaw, 10, dt);
+          target.group.rotation.y = target.facingYaw;
+          continue;
+        }
+        if (target.attackingUntil && elapsed < target.attackingUntil) {
+          target.facingYaw = dampAngle(target.facingYaw, playerFacingYaw, 16, dt);
+          target.group.rotation.y = target.facingYaw;
+          continue;
+        }
 
         if (distanceToPlayer <= 2.38) {
+          target.facingYaw = dampAngle(target.facingYaw, playerFacingYaw, 14, dt);
+          target.group.rotation.y = target.facingYaw;
           setEnemyLocomotion(target, "idle");
           if (elapsed >= (target.nextAttackAt ?? 0)) {
             const attackKey =
@@ -3606,7 +4069,10 @@ const mount = element<HTMLDivElement>("viewport");
                   ? "attackAlt"
                   : "attack";
             playEnemyOneShot(target, attackKey);
-            target.attackingUntil = elapsed + 760;
+            const attackDuration = target.motion === "crawler" ? 1080 : 840;
+            const attackImpactDelay =
+              target.motion === "crawler" ? 420 : attackKey === "attackAlt" ? 350 : 310;
+            target.attackingUntil = elapsed + attackDuration;
             target.nextAttackAt =
               elapsed +
               drill.fireDelay * enemyFireScale(difficultyRef.current) * (ghostActive ? 1.2 : 1) +
@@ -3627,15 +4093,21 @@ const mount = element<HTMLDivElement>("viewport");
                 camera.position.z - target.baseZ,
               );
               if (currentDistance <= 2.75) damagePlayerFromZombie(target);
-            }, 310);
+            }, attackImpactDelay);
           }
           continue;
         }
 
         const advance = advanceEnemyTowardPlayer(target, target.speed, dt);
-        target.group.position.x = target.baseX;
-        target.group.position.z = target.baseZ;
         if (advance.moved) {
+          target.lastMovedAt = elapsed;
+          target.facingYaw = dampAngle(
+            target.facingYaw,
+            Math.atan2(advance.directionX, advance.directionZ),
+            target.motion === "runner" ? 15 : 11,
+            dt,
+          );
+          target.group.rotation.y = target.facingYaw;
           setEnemyLocomotion(
             target,
             target.motion === "crawler"
@@ -3646,7 +4118,10 @@ const mount = element<HTMLDivElement>("viewport");
                 ? "run"
                 : "walk",
           );
-        } else if (!advance.arrived) {
+        } else if (
+          !advance.arrived &&
+          elapsed - (target.lastMovedAt ?? -1000) > 180
+        ) {
           setEnemyLocomotion(target, "idle");
         }
       }
@@ -3690,7 +4165,6 @@ const mount = element<HTMLDivElement>("viewport");
         particle.mesh.rotation.z += dt * 8;
         if (particle.life <= 0) {
           scene.remove(particle.mesh);
-          particle.mesh.geometry.dispose();
           particles.splice(i, 1);
         }
       }
@@ -3703,6 +4177,8 @@ const mount = element<HTMLDivElement>("viewport");
         const dropout = Math.sin(elapsed * 0.0037 + phase * 2.3) > 0.96 ? 0.18 : 1;
         light.intensity = base * (0.82 + flutter) * dropout;
       }
+      windowGlow.emissiveIntensity =
+        2.15 + Math.sin(elapsed * 0.0017) * 0.16;
       smokeWisps.forEach((wisp, index) => {
         wisp.position.x += Math.sin(elapsed * 0.00022 + wisp.userData.phase) * wisp.userData.drift * dt;
         wisp.position.y = 1.1 + index * 0.16 + Math.sin(elapsed * 0.00034 + index) * 0.38;
@@ -3778,14 +4254,12 @@ const mount = element<HTMLDivElement>("viewport");
   }
 
   function onLookStart(event: PointerEvent) {
-    if (youtubePaused || !event.isPrimary || lookPointer.current !== null) return;
+    if (youtubePaused || lookPointer.current !== null) return;
     event.preventDefault();
     event.stopPropagation();
     lookPointer.current = event.pointerId;
     lookLast.current = { x: event.clientX, y: event.clientY };
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    engineRef.current?.setAiming(true);
-    engineRef.current?.setFiring(true);
   }
 
   function onLookMove(event: PointerEvent) {
@@ -3801,8 +4275,23 @@ const mount = element<HTMLDivElement>("viewport");
     if (youtubePaused || lookPointer.current !== event.pointerId) return;
     event.preventDefault();
     lookPointer.current = null;
+  }
+
+  function onShootStart(event: PointerEvent) {
+    if (youtubePaused || shootPointer.current !== null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    shootPointer.current = event.pointerId;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    engineRef.current?.setFiring(true);
+  }
+
+  function onShootEnd(event: PointerEvent) {
+    if (shootPointer.current !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    shootPointer.current = null;
     engineRef.current?.setFiring(false);
-    engineRef.current?.setAiming(false);
   }
 
   element<HTMLButtonElement>("reload-button").addEventListener("click", () =>
@@ -3848,6 +4337,11 @@ const mount = element<HTMLDivElement>("viewport");
   touchLayer.addEventListener("pointerup", onLookEnd);
   touchLayer.addEventListener("pointercancel", onLookEnd);
   touchLayer.addEventListener("lostpointercapture", onLookEnd);
+  const shootButton = element<HTMLButtonElement>("shoot-button");
+  shootButton.addEventListener("pointerdown", onShootStart);
+  shootButton.addEventListener("pointerup", onShootEnd);
+  shootButton.addEventListener("pointercancel", onShootEnd);
+  shootButton.addEventListener("lostpointercapture", onShootEnd);
 
   updateWeaponRail();
   setFeed(feed);
