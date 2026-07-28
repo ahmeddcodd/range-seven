@@ -20,6 +20,36 @@
   </head>
   <body>
     <main class="game-shell">
+      <section
+        id="loading-screen"
+        class="loading-screen"
+        role="status"
+        aria-live="polite"
+        aria-label="Loading game assets"
+      >
+        <div class="loading-atmosphere" aria-hidden="true"></div>
+        <div class="loading-panel">
+          <span class="loading-eyebrow">QUARANTINE DISTRICT // 07</span>
+          <h1>THE NIGHT<br /><b>IS WAKING</b></h1>
+          <p id="loading-status">Preparing the last safe street...</p>
+          <div
+            class="loading-track"
+            role="progressbar"
+            aria-label="Game loading progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="0"
+          >
+            <i id="loading-fill"></i>
+          </div>
+          <div class="loading-readout">
+            <span id="loading-detail">INITIALIZING SCENE</span>
+            <strong id="loading-percent">0%</strong>
+          </div>
+          <button id="loading-retry" type="button" hidden>TRY AGAIN</button>
+        </div>
+      </section>
+
       <div id="viewport" class="viewport"></div>
       <div id="level-flash"></div>
       <div id="player-hit-flash"></div>
@@ -160,7 +190,7 @@
           <div><span>02</span><b>FIRE</b><small id="fire-help">LEFT CLICK</small></div>
           <div><span>03</span><b>HOLD GROUND</b><small id="move-help">NO MOVEMENT</small></div>
         </div>
-        <button id="deploy-button" class="deploy-button">
+        <button id="deploy-button" class="deploy-button" disabled aria-disabled="true">
           <span>BEGIN THE NIGHT</span><i>▶</i>
         </button>
         <small class="legal">ORIGINAL SURVIVAL EXPERIENCE · HEADPHONES RECOMMENDED</small>

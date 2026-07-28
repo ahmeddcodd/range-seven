@@ -85,6 +85,7 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
     packageJson,
     viteConfig,
     vercelConfig,
+    indexSource,
   ] = await Promise.all([
     readFile(new URL("../src/main.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/youtube-playables.ts", import.meta.url), "utf8"),
@@ -92,6 +93,7 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../vercel.json", import.meta.url), "utf8"),
+    readFile(new URL("../index.html", import.meta.url), "utf8"),
   ]);
 
   assert.match(source, /import \* as THREE from "three"/);
@@ -238,7 +240,13 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /maxPixelRatio: mobileRendering/);
   assert.match(source, /renderer\.shadowMap\.enabled = renderProfile\.shadows/);
   assert.match(source, /practicalLightsUsed < renderProfile\.practicalLights/);
-  assert.match(source, /characterAnimationAccumulator >= 1 \/ 30/);
+  assert.match(source, /characterAnimationAccumulator >= 1 \/ renderProfile\.characterAnimationFps/);
+  assert.match(source, /premiumMobileRendering/);
+  assert.match(source, /antialias: renderProfile\.antialias/);
+  assert.match(source, /LinearMipmapLinearFilter/);
+  assert.match(source, /new GLTFLoader\(loadingManager\)/);
+  assert.match(source, /renderer[\s\S]*?\.compileAsync\(scene, camera\)/);
+  assert.match(source, /if \(youtubePaused \|\| !gameAssetsReady\) return/);
   assert.match(source, /bloodParticleGeometry/);
   assert.match(source, /object\.frustumCulled = true/);
   assert.doesNotMatch(source, /const rimLight = new THREE\.DirectionalLight/);
@@ -257,6 +265,9 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(styles, /\[hidden\]\s*\{[\s\S]*display:\s*none\s*!important/);
   assert.match(styles, /@media \(pointer: coarse\)/);
   assert.match(styles, /\.mobile-shoot-button/);
+  assert.match(styles, /\.loading-screen/);
+  assert.match(indexSource, /id="loading-screen"/);
+  assert.match(indexSource, /id="loading-fill"/);
   assert.doesNotMatch(styles, /\.crosshair\.aiming/);
   assert.match(styles, /\.score-hud/);
   assert.match(styles, /\.kill-feed \{[\s\S]*?right: auto;[\s\S]*?border: 0;/);

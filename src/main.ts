@@ -436,6 +436,7 @@ const engineRef: {
   } | null;
 } = { current: null };
 
+let gameAssetsReady = false;
 let started = false;
 let gameOver = false;
 let score = 0;
@@ -787,14 +788,27 @@ const performanceNavigator = navigator as Navigator & {
   connection?: { saveData?: boolean };
 };
 const mobileRendering = coarsePointerQuery.matches;
+const mobileDeviceMemory = performanceNavigator.deviceMemory ?? 4;
+const mobileCpuCores = navigator.hardwareConcurrency || 4;
 const constrainedRendering =
   performanceNavigator.connection?.saveData === true ||
   (mobileRendering &&
-    ((performanceNavigator.deviceMemory ?? 4) <= 4 ||
-      (navigator.hardwareConcurrency || 4) <= 4));
+    (mobileDeviceMemory <= 3 || mobileCpuCores <= 3));
+const premiumMobileRendering =
+  mobileRendering &&
+  !constrainedRendering &&
+  mobileDeviceMemory >= 6 &&
+  mobileCpuCores >= 6;
 const renderProfile = {
-  maxPixelRatio: mobileRendering ? (constrainedRendering ? 0.95 : 1.15) : 1.5,
-  minPixelRatio: mobileRendering ? 0.72 : 1,
+  maxPixelRatio: mobileRendering
+    ? constrainedRendering
+      ? 1.15
+      : premiumMobileRendering
+        ? 1.75
+        : 1.5
+    : 1.5,
+  minPixelRatio: mobileRendering ? (constrainedRendering ? 0.9 : 1.05) : 1,
+  antialias: !constrainedRendering,
   shadows: !mobileRendering,
   shadowMapSize: 768,
   practicalLights: mobileRendering ? 1 : 2,
@@ -802,6 +816,7 @@ const renderProfile = {
   rearSmoke: constrainedRendering ? 8 : mobileRendering ? 12 : 18,
   dustCount: constrainedRendering ? 90 : mobileRendering ? 150 : 260,
   hitParticles: constrainedRendering ? 8 : mobileRendering ? 11 : 17,
+  characterAnimationFps: constrainedRendering ? 30 : mobileRendering ? 45 : 60,
 };
 const removeYouTubePauseListener = youtubePlayables.onPause(() => {
   requestCloudSave(true);
@@ -820,6 +835,83 @@ const removeYouTubeAudioListener = youtubePlayables.onAudioChange((enabled) => {
 });
 const mount = element<HTMLDivElement>("viewport");
 
+    const loadingScreen = element<HTMLElement>("loading-screen");
+    const loadingStatus = element<HTMLElement>("loading-status");
+    const loadingDetail = element<HTMLElement>("loading-detail");
+    const loadingPercent = element<HTMLElement>("loading-percent");
+    const loadingFill = element<HTMLElement>("loading-fill");
+    const loadingTrack = loadingScreen.querySelector<HTMLElement>(".loading-track")!;
+    const deployButton = element<HTMLButtonElement>("deploy-button");
+    const loadingRetry = element<HTMLButtonElement>("loading-retry");
+    let sceneFirstFrameRendered = false;
+    let trackedAssetsLoaded = false;
+    let shadersPrepared = false;
+    let loadingFailed = false;
+    let shaderPreparationStarted = false;
+
+    function updateLoadingProgress(
+      progress: number,
+      detail: string,
+      status = "Loading scene and survival assets...",
+    ) {
+      const value = Math.round(THREE.MathUtils.clamp(progress, 0, 100));
+      loadingFill.style.width = `${value}%`;
+      loadingPercent.textContent = `${value}%`;
+      loadingDetail.textContent = detail;
+      loadingStatus.textContent = status;
+      loadingTrack.setAttribute("aria-valuenow", String(value));
+    }
+
+    function showLoadingFailure(url: string) {
+      loadingFailed = true;
+      gameAssetsReady = false;
+      deployButton.disabled = true;
+      deployButton.setAttribute("aria-disabled", "true");
+      loadingScreen.classList.add("failed");
+      loadingRetry.hidden = false;
+      updateLoadingProgress(
+        0,
+        "CONNECTION LOST",
+        `Could not load ${url.split("/").pop() ?? "a required asset"}.`,
+      );
+    }
+
+    function finishLoading() {
+      if (
+        gameAssetsReady ||
+        loadingFailed ||
+        !trackedAssetsLoaded ||
+        !sceneFirstFrameRendered ||
+        !shadersPrepared
+      ) {
+        return;
+      }
+      gameAssetsReady = true;
+      updateLoadingProgress(100, "READY", "Everything is loaded. Survive the night.");
+      deployButton.disabled = false;
+      deployButton.setAttribute("aria-disabled", "false");
+      document.documentElement.dataset.assetsReady = "true";
+      document.documentElement.dataset.gameReady = "true";
+      youtubePlayables.signalGameReady();
+      loadingScreen.classList.add("complete");
+      window.setTimeout(() => {
+        if (gameAssetsReady) loadingScreen.hidden = true;
+      }, 560);
+    }
+
+    const loadingManager = new THREE.LoadingManager();
+    loadingManager.onStart = () => {
+      updateLoadingProgress(10, "LOCATING SURVIVORS");
+    };
+    loadingManager.onProgress = (_url, loaded, total) => {
+      updateLoadingProgress(
+        10 + (loaded / Math.max(1, total)) * 78,
+        loaded < total ? "LOADING INFECTED" : "ASSEMBLING STREET",
+      );
+    };
+    loadingManager.onError = showLoadingFailure;
+    loadingRetry.addEventListener("click", () => window.location.reload());
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x07100f);
     scene.fog = new THREE.FogExp2(0x0b1615, 0.0135);
@@ -834,7 +926,7 @@ const mount = element<HTMLDivElement>("viewport");
     camera.rotation.order = "YXZ";
 
     const renderer = new THREE.WebGLRenderer({
-      antialias: !mobileRendering,
+      antialias: renderProfile.antialias,
       powerPreference: "high-performance",
       alpha: false,
       stencil: false,
@@ -845,6 +937,7 @@ const mount = element<HTMLDivElement>("viewport");
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.16;
+    renderer.domElement.style.imageRendering = "auto";
     renderer.shadowMap.enabled = renderProfile.shadows;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.domElement.setAttribute("aria-label", "Three-dimensional zombie survival street");
@@ -1424,7 +1517,28 @@ const mount = element<HTMLDivElement>("viewport");
       if (enemyAssetsReady) deployLevelSquad();
     }
 
-    const zombieLoader = new GLTFLoader();
+    function improveImportedTexture(texture: THREE.Texture | null) {
+      if (!texture) return;
+      texture.anisotropy = Math.min(
+        premiumMobileRendering ? 8 : 4,
+        renderer.capabilities.getMaxAnisotropy(),
+      );
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = true;
+      texture.needsUpdate = true;
+    }
+
+    function improveImportedMaterial(material: THREE.Material) {
+      if (!(material instanceof THREE.MeshStandardMaterial)) return;
+      improveImportedTexture(material.map);
+      improveImportedTexture(material.normalMap);
+      improveImportedTexture(material.roughnessMap);
+      improveImportedTexture(material.metalnessMap);
+      improveImportedTexture(material.emissiveMap);
+    }
+
+    const zombieLoader = new GLTFLoader(loadingManager);
     zombieLoader.load(
       "./models/zombie.glb",
       (gltf) => {
@@ -1439,6 +1553,7 @@ const mount = element<HTMLDivElement>("viewport");
               : [object.material];
             for (const material of materials) {
               if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+              improveImportedMaterial(material);
               material.emissive.setHex(0x10191a);
               material.emissiveIntensity = 0.32;
               material.roughness = Math.max(material.roughness, 0.78);
@@ -1896,7 +2011,7 @@ const mount = element<HTMLDivElement>("viewport");
     }
     buildWeapon(0);
 
-    new GLTFLoader().load(
+    new GLTFLoader(loadingManager).load(
       "./models/fps-akm.glb",
       (gltf) => {
         if (engineDisposed) return;
@@ -1916,6 +2031,7 @@ const mount = element<HTMLDivElement>("viewport");
               : [object.material];
             for (const material of materials) {
               if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+              improveImportedMaterial(material);
               material.roughness = Math.max(material.roughness, 0.76);
               material.metalness = Math.min(material.metalness, 0.3);
               material.envMapIntensity = 0;
@@ -1970,6 +2086,34 @@ const mount = element<HTMLDivElement>("viewport");
       undefined,
       () => showFeed("AKM MODEL FALLBACK ACTIVE"),
     );
+
+    loadingManager.onLoad = () => {
+      if (loadingFailed || engineDisposed) return;
+      trackedAssetsLoaded = true;
+      updateLoadingProgress(92, "WARMING SHADERS", "Preparing the first encounter...");
+      if (shaderPreparationStarted) return;
+      shaderPreparationStarted = true;
+      const warmupZombie = zombieTemplate
+        ? cloneSkeleton(zombieTemplate)
+        : null;
+      if (warmupZombie) {
+        warmupZombie.position.set(0, -40, -8);
+        warmupZombie.scale.setScalar(0.42);
+        warmupZombie.traverse((object) => {
+          if (object instanceof THREE.Mesh) object.frustumCulled = false;
+        });
+        scene.add(warmupZombie);
+      }
+      void renderer
+        .compileAsync(scene, camera)
+        .catch(() => undefined)
+        .finally(() => {
+          if (warmupZombie) scene.remove(warmupZombie);
+          shadersPrepared = true;
+          updateLoadingProgress(98, "OPENING THE STREET");
+          finishLoading();
+        });
+    };
 
     const raycaster = new THREE.Raycaster();
     const aim = new THREE.Vector2(0, 0);
@@ -3956,7 +4100,7 @@ const mount = element<HTMLDivElement>("viewport");
 
       characterAnimationAccumulator += dt;
       const updateCharacterAnimations =
-        !mobileRendering || characterAnimationAccumulator >= 1 / 30;
+        characterAnimationAccumulator >= 1 / renderProfile.characterAnimationFps;
       const characterAnimationStep = characterAnimationAccumulator;
       if (updateCharacterAnimations) characterAnimationAccumulator = 0;
 
@@ -4206,9 +4350,12 @@ const mount = element<HTMLDivElement>("viewport");
           (0.8 + Math.sin(elapsed * 0.0003 + phase) * 0.2);
       });
       renderer.render(scene, camera);
-      youtubePlayables.signalFirstFrameReady();
-      youtubePlayables.signalGameReady();
-      document.documentElement.dataset.gameReady = "true";
+      if (!sceneFirstFrameRendered) {
+        sceneFirstFrameRendered = true;
+        youtubePlayables.signalFirstFrameReady();
+        updateLoadingProgress(96, "LIGHTING THE STREET");
+        finishLoading();
+      }
     }
 
     function startLoop() {
@@ -4248,7 +4395,7 @@ const mount = element<HTMLDivElement>("viewport");
     });
 
   function begin() {
-    if (youtubePaused) return;
+    if (youtubePaused || !gameAssetsReady) return;
     setStarted(true);
     engineRef.current?.start();
   }
