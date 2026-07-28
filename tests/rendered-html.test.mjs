@@ -120,6 +120,27 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /duckMusic\(weapon\.reloadMs \+ 140, 0\.72\)/);
   assert.match(source, /function hitConfirmAudio/);
   assert.match(source, /pulseShotFlash\(\)/);
+  // One-shots are baked offline instead of rebuilt per trigger pull. The live
+  // graph was 11 nodes a shot (~110 allocations/sec at 600 RPM) and every
+  // vocalisation synthesised its own buffer on the main thread, which is what
+  // made mobile audio break up during sustained fire.
+  assert.match(source, /function buildShotGraph/);
+  assert.match(source, /function prepareShotBuffers/);
+  assert.match(source, /new OfflineAudioContext\(1, frames, audio\.sampleRate\)/);
+  assert.match(source, /const baked = shotBuffers\.get\(index\)/);
+  assert.match(source, /function prepareVocalBuffers/);
+  assert.match(source, /function renderVocal/);
+  assert.match(source, /const pool = vocalPools\.get\(vocalKey\(kind, alleyScream\)\)/);
+  assert.match(source, /void prepareShotBuffers\(\)/);
+  assert.match(source, /void prepareVocalBuffers\(\)/);
+  // writeVocalSamples must stay reachable only from the offline bake path.
+  assert.match(source, /function writeVocalSamples/);
+  assert.doesNotMatch(source, /const samples = vocalBuffer\.getChannelData/);
+  // Premium phones keep the shadow pass, with a one-way governor fallback.
+  assert.match(source, /shadows: !mobileRendering \|\| premiumMobileRendering/);
+  assert.match(source, /function dropShadowsForPerformance/);
+  assert.match(source, /sustainedSlowSamples >= 2/);
+  assert.match(source, /object\.castShadow = shadowsLive/);
   assert.match(source, /zombie\.glb/);
   assert.doesNotMatch(source, /enemy-punk\.glb|enemy-glock\.glb/);
   assert.match(source, /cloneSkeleton/);
@@ -255,10 +276,14 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /function zombieVocal/);
   assert.match(source, /creatureVocalCompressor/);
   assert.match(source, /creatureVocalReverb/);
-  assert.match(source, /const vocalBuffer = audio\.createBuffer/);
-  assert.match(source, /const throatFilter = audio\.createBiquadFilter/);
-  assert.match(source, /const mouthFilter = audio\.createBiquadFilter/);
-  assert.match(source, /const raspFilter = audio\.createBiquadFilter/);
+  // The throat/mouth/rasp formant stack still shapes every vocalisation, but
+  // it is baked into the buffer offline rather than rebuilt on the live
+  // context per zombie.
+  assert.match(source, /const raw = offline\.createBuffer\(1, frames, offline\.sampleRate\)/);
+  assert.match(source, /const throatFilter = offline\.createBiquadFilter/);
+  assert.match(source, /const mouthFilter = offline\.createBiquadFilter/);
+  assert.match(source, /const raspFilter = offline\.createBiquadFilter/);
+  assert.doesNotMatch(source, /const throatFilter = audio\.createBiquadFilter/);
   assert.doesNotMatch(source, /oscillator\.type = "sawtooth"|growl\.type = "square"/);
   assert.match(source, /brickTexture/);
   assert.match(source, /smokeWisps/);

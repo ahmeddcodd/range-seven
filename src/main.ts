@@ -863,14 +863,50 @@ const renderProfile = {
     : 1.5,
   minPixelRatio: mobileRendering ? (constrainedRendering ? 0.9 : 1.05) : 1,
   antialias: !constrainedRendering,
-  shadows: !mobileRendering,
-  shadowMapSize: 768,
+  /*
+   * There is only one shadow-casting light in the scene, and a flagship phone
+   * carries it comfortably — leaving every phone flat-lit was costing far more
+   * in depth than it saved in frame time. The governor in the render loop drops
+   * the pass again on any device that turns out not to keep up.
+   */
+  shadows: !mobileRendering || premiumMobileRendering,
+  shadowMapSize: mobileRendering ? 512 : 768,
   practicalLights: mobileRendering ? 1 : 2,
-  smokeWisps: constrainedRendering ? 3 : mobileRendering ? 5 : 8,
-  rearSmoke: constrainedRendering ? 8 : mobileRendering ? 12 : 18,
-  dustCount: constrainedRendering ? 90 : mobileRendering ? 150 : 260,
-  hitParticles: constrainedRendering ? 8 : mobileRendering ? 11 : 17,
-  characterAnimationFps: constrainedRendering ? 30 : mobileRendering ? 45 : 60,
+  smokeWisps: constrainedRendering
+    ? 3
+    : premiumMobileRendering
+      ? 7
+      : mobileRendering
+        ? 5
+        : 8,
+  rearSmoke: constrainedRendering
+    ? 8
+    : premiumMobileRendering
+      ? 15
+      : mobileRendering
+        ? 12
+        : 18,
+  dustCount: constrainedRendering
+    ? 90
+    : premiumMobileRendering
+      ? 210
+      : mobileRendering
+        ? 150
+        : 260,
+  hitParticles: constrainedRendering
+    ? 8
+    : premiumMobileRendering
+      ? 14
+      : mobileRendering
+        ? 11
+        : 17,
+  characterAnimationFps: constrainedRendering
+    ? 30
+    : premiumMobileRendering
+      ? 60
+      : mobileRendering
+        ? 45
+        : 60,
 };
 const removeYouTubePauseListener = youtubePlayables.onPause(() => {
   requestCloudSave(true);
@@ -994,6 +1030,8 @@ const mount = element<HTMLDivElement>("viewport");
     renderer.domElement.style.imageRendering = "auto";
     renderer.shadowMap.enabled = renderProfile.shadows;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    /** Live shadow state — the governor can retire this, never restore it. */
+    let shadowsLive = renderProfile.shadows;
     renderer.domElement.setAttribute("aria-label", "Three-dimensional zombie survival street");
     mount.appendChild(renderer.domElement);
 
@@ -1646,8 +1684,8 @@ const mount = element<HTMLDivElement>("viewport");
       character.traverse((object) => {
         if (!(object instanceof THREE.Mesh)) return;
         object.frustumCulled = true;
-        object.castShadow = renderProfile.shadows;
-        object.receiveShadow = renderProfile.shadows;
+        object.castShadow = shadowsLive;
+        object.receiveShadow = shadowsLive;
         object.userData = { targetId: id, zone: "torso" };
       });
       group.add(character);
@@ -2651,53 +2689,67 @@ const mount = element<HTMLDivElement>("viewport");
       }
     }
 
-    function shotAudio(index: number) {
-      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
-      initAudio();
-      if (!noiseBuffer) return;
-      const t = audio.currentTime;
-      duckMusic(115, 0.7);
+    function fillDecayNoise(buffer: AudioBuffer) {
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
+      }
+      return buffer;
+    }
 
-      const crack = audio.createBufferSource();
-      const crackFilter = audio.createBiquadFilter();
-      const crackGain = audio.createGain();
-      crack.buffer = noiseBuffer;
+    /**
+     * Lays one gunshot down on `ctx`. Built once per weapon into an offline
+     * buffer rather than per trigger pull: this graph is eleven nodes, and at
+     * 600 RPM that was ~110 node allocations a second, which is enough to make
+     * a phone's audio thread stutter.
+     */
+    function buildShotGraph(
+      ctx: BaseAudioContext,
+      destination: AudioNode,
+      index: number,
+      noise: AudioBuffer,
+      t: number,
+    ) {
+      const crack = ctx.createBufferSource();
+      const crackFilter = ctx.createBiquadFilter();
+      const crackGain = ctx.createGain();
+      crack.buffer = noise;
       crack.playbackRate.value = index === 1 ? 1.28 : index === 2 ? 0.82 : 1;
       crackFilter.type = "highpass";
       crackFilter.frequency.value = index === 1 ? 1450 : index === 2 ? 760 : 1080;
       crackGain.gain.setValueAtTime(index === 2 ? 0.62 : 0.54, t);
       crackGain.gain.exponentialRampToValueAtTime(0.001, t + 0.052);
-      crack.connect(crackFilter).connect(crackGain).connect(weaponEffectsBus);
+      crack.connect(crackFilter).connect(crackGain).connect(destination);
       crack.start(t, 0, 0.06);
 
-      const body = audio.createBufferSource();
-      const bodyFilter = audio.createBiquadFilter();
-      const bodyGain = audio.createGain();
-      body.buffer = noiseBuffer;
+      const body = ctx.createBufferSource();
+      const bodyFilter = ctx.createBiquadFilter();
+      const bodyGain = ctx.createGain();
+      body.buffer = noise;
       body.playbackRate.value = index === 2 ? 0.58 : 0.78;
       bodyFilter.type = "bandpass";
       bodyFilter.frequency.value = index === 1 ? 780 : index === 2 ? 420 : 560;
       bodyFilter.Q.value = 0.58;
       bodyGain.gain.setValueAtTime(index === 2 ? 0.48 : 0.37, t);
       bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
-      body.connect(bodyFilter).connect(bodyGain).connect(weaponEffectsBus);
+      body.connect(bodyFilter).connect(bodyGain).connect(destination);
       body.start(t, 0.008, 0.115);
 
-      const thump = audio.createOscillator();
-      const thumpGain = audio.createGain();
+      const thump = ctx.createOscillator();
+      const thumpGain = ctx.createGain();
       thump.type = "triangle";
       thump.frequency.setValueAtTime(index === 2 ? 104 : 132, t);
       thump.frequency.exponentialRampToValueAtTime(42, t + 0.095);
       thumpGain.gain.setValueAtTime(index === 2 ? 0.42 : 0.34, t);
       thumpGain.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
-      thump.connect(thumpGain).connect(weaponEffectsBus);
+      thump.connect(thumpGain).connect(destination);
       thump.start(t);
       thump.stop(t + 0.12);
 
-      const tail = audio.createBufferSource();
-      const tailFilter = audio.createBiquadFilter();
-      const tailGain = audio.createGain();
-      tail.buffer = noiseBuffer;
+      const tail = ctx.createBufferSource();
+      const tailFilter = ctx.createBiquadFilter();
+      const tailGain = ctx.createGain();
+      tail.buffer = noise;
       tail.playbackRate.value = 0.52;
       tailFilter.type = "bandpass";
       tailFilter.frequency.value = 1180;
@@ -2705,8 +2757,61 @@ const mount = element<HTMLDivElement>("viewport");
       tailGain.gain.setValueAtTime(0.001, t);
       tailGain.gain.linearRampToValueAtTime(0.12, t + 0.038);
       tailGain.gain.exponentialRampToValueAtTime(0.001, t + 0.19);
-      tail.connect(tailFilter).connect(tailGain).connect(weaponEffectsBus);
+      tail.connect(tailFilter).connect(tailGain).connect(destination);
       tail.start(t + 0.03, 0.012, 0.12);
+    }
+
+    const SHOT_BUFFER_SECONDS = 0.3;
+    const shotBuffers = new Map<number, AudioBuffer>();
+
+    async function prepareShotBuffers() {
+      if (typeof OfflineAudioContext === "undefined") return;
+      const frames = Math.ceil(audio.sampleRate * SHOT_BUFFER_SECONDS);
+      for (let index = 0; index < WEAPONS.length; index++) {
+        try {
+          const offline = new OfflineAudioContext(1, frames, audio.sampleRate);
+          const noise = fillDecayNoise(
+            offline.createBuffer(
+              1,
+              Math.ceil(offline.sampleRate * 0.12),
+              offline.sampleRate,
+            ),
+          );
+          buildShotGraph(offline, offline.destination, index, noise, 0);
+          shotBuffers.set(index, await offline.startRendering());
+        } catch {
+          // Leaves the live graph fallback in shotAudio as the safety net.
+        }
+      }
+    }
+
+    function shotAudio(index: number) {
+      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
+      initAudio();
+      duckMusic(115, 0.7);
+
+      const baked = shotBuffers.get(index);
+      if (baked) {
+        // Two nodes per shot. Pitch and level jitter keep repeated fire from
+        // sounding like one sample on loop.
+        const source = audio.createBufferSource();
+        const gain = audio.createGain();
+        source.buffer = baked;
+        source.playbackRate.value = 0.97 + Math.random() * 0.062;
+        gain.gain.value = 0.9 + Math.random() * 0.2;
+        source.connect(gain).connect(weaponEffectsBus);
+        source.start();
+        return;
+      }
+
+      if (!noiseBuffer) return;
+      buildShotGraph(
+        audio,
+        weaponEffectsBus,
+        index,
+        noiseBuffer,
+        audio.currentTime,
+      );
     }
 
     function tone(frequency: number, duration: number, volume = 0.1) {
@@ -2759,30 +2864,31 @@ const mount = element<HTMLDivElement>("viewport");
 
     let lastZombieVocalAt = -10;
 
-    function zombieVocal(
-      kind: "scream" | "attack" | "death",
-      pan = 0,
-      intensity = 1,
-      entrance: "street" | "alley" = "street",
-    ) {
-      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
-      initAudio();
-      const t = audio.currentTime;
-      if (kind === "scream" && t - lastZombieVocalAt < 0.14) return;
-      lastZombieVocalAt = t;
+    type VocalKind = "scream" | "attack" | "death";
 
-      const alleyScream = kind === "scream" && entrance === "alley";
-      const duration =
-        kind === "scream"
-          ? alleyScream
-            ? 0.94
-            : 1.32
-          : kind === "death"
-            ? 0.82
-            : 0.42;
-      const sampleCount = Math.ceil(audio.sampleRate * duration);
-      const vocalBuffer = audio.createBuffer(1, sampleCount, audio.sampleRate);
-      const samples = vocalBuffer.getChannelData(0);
+    function vocalDuration(kind: VocalKind, alleyScream: boolean) {
+      return kind === "scream"
+        ? alleyScream
+          ? 0.94
+          : 1.32
+        : kind === "death"
+          ? 0.82
+          : 0.42;
+    }
+
+    /**
+     * Writes the glottal source for one vocalisation. This loop costs ~9ms per
+     * scream on a desktop CPU and several times that on a phone, so it runs
+     * only while baking the variant pool below — never during play, where it
+     * stalled the main thread and starved the audio thread mid-firefight.
+     */
+    function writeVocalSamples(
+      samples: Float32Array,
+      sampleRate: number,
+      kind: VocalKind,
+      alleyScream: boolean,
+    ) {
+      const sampleCount = samples.length;
       const startPitch =
         kind === "scream"
           ? alleyScream
@@ -2808,7 +2914,7 @@ const mount = element<HTMLDivElement>("viewport");
           1 +
           Math.sin(progress * Math.PI * (kind === "scream" ? 17 : 10)) * 0.035 +
           Math.sin(progress * Math.PI * 43) * 0.012;
-        phase += (pitchArc * pitchWobble) / audio.sampleRate;
+        phase += (pitchArc * pitchWobble) / sampleRate;
         phase -= Math.floor(phase);
         const airflow = Math.random() * 2 - 1;
         throatNoise = throatNoise * 0.87 + airflow * 0.13;
@@ -2819,18 +2925,37 @@ const mount = element<HTMLDivElement>("viewport");
         const breath = airflow * (alleyScream ? 0.24 : 0.14);
         samples[index] = (glottal + rasp + breath) * envelope * 0.72;
       }
+    }
 
-      const source = audio.createBufferSource();
-      const panner = audio.createStereoPanner();
-      const throatFilter = audio.createBiquadFilter();
-      const throatGain = audio.createGain();
-      const mouthFilter = audio.createBiquadFilter();
-      const mouthGain = audio.createGain();
-      const raspFilter = audio.createBiquadFilter();
-      const raspGain = audio.createGain();
-      const outputGain = audio.createGain();
-      source.buffer = vocalBuffer;
-      panner.pan.value = THREE.MathUtils.clamp(pan, -0.88, 0.88);
+    const VOCAL_VARIANTS = 3;
+    const vocalPools = new Map<string, AudioBuffer[]>();
+    const vocalKey = (kind: VocalKind, alleyScream: boolean) =>
+      `${kind}:${alleyScream ? "alley" : "street"}`;
+
+    /**
+     * Bakes the throat/mouth/rasp formant stack into the buffer too, so a
+     * vocalisation plays back on three nodes rather than nine.
+     */
+    async function renderVocal(kind: VocalKind, alleyScream: boolean) {
+      const duration = vocalDuration(kind, alleyScream);
+      const frames = Math.ceil(audio.sampleRate * duration);
+      const offline = new OfflineAudioContext(1, frames, audio.sampleRate);
+      const raw = offline.createBuffer(1, frames, offline.sampleRate);
+      writeVocalSamples(
+        raw.getChannelData(0),
+        offline.sampleRate,
+        kind,
+        alleyScream,
+      );
+
+      const source = offline.createBufferSource();
+      const throatFilter = offline.createBiquadFilter();
+      const throatGain = offline.createGain();
+      const mouthFilter = offline.createBiquadFilter();
+      const mouthGain = offline.createGain();
+      const raspFilter = offline.createBiquadFilter();
+      const raspGain = offline.createGain();
+      source.buffer = raw;
       throatFilter.type = "lowpass";
       throatFilter.frequency.value = alleyScream ? 690 : kind === "attack" ? 560 : 470;
       throatFilter.Q.value = 0.7;
@@ -2843,6 +2968,61 @@ const mount = element<HTMLDivElement>("viewport");
       raspFilter.frequency.value = alleyScream ? 2180 : 1480;
       raspFilter.Q.value = 0.82;
       raspGain.gain.value = alleyScream ? 0.16 : 0.1;
+      source.connect(throatFilter).connect(throatGain).connect(offline.destination);
+      source.connect(mouthFilter).connect(mouthGain).connect(offline.destination);
+      source.connect(raspFilter).connect(raspGain).connect(offline.destination);
+      source.start(0);
+      return offline.startRendering();
+    }
+
+    async function prepareVocalBuffers() {
+      if (typeof OfflineAudioContext === "undefined") return;
+      const combinations: [VocalKind, boolean][] = [
+        ["scream", false],
+        ["scream", true],
+        ["attack", false],
+        ["death", false],
+      ];
+      for (const [kind, alleyScream] of combinations) {
+        const key = vocalKey(kind, alleyScream);
+        const pool: AudioBuffer[] = [];
+        vocalPools.set(key, pool);
+        for (let variant = 0; variant < VOCAL_VARIANTS; variant++) {
+          try {
+            pool.push(await renderVocal(kind, alleyScream));
+          } catch {
+            // A short pool still plays; an empty one just stays silent.
+          }
+        }
+      }
+    }
+
+    function zombieVocal(
+      kind: VocalKind,
+      pan = 0,
+      intensity = 1,
+      entrance: "street" | "alley" = "street",
+    ) {
+      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
+      initAudio();
+      const t = audio.currentTime;
+      if (kind === "scream" && t - lastZombieVocalAt < 0.14) return;
+
+      const alleyScream = kind === "scream" && entrance === "alley";
+      const pool = vocalPools.get(vocalKey(kind, alleyScream));
+      if (!pool || pool.length === 0) return;
+      lastZombieVocalAt = t;
+
+      const buffer = pool[(Math.random() * pool.length) | 0];
+      const source = audio.createBufferSource();
+      const outputGain = audio.createGain();
+      const panner = audio.createStereoPanner();
+      source.buffer = buffer;
+      // Reused buffers, so detune per zombie to keep the horde from sounding
+      // like one throat.
+      source.playbackRate.value = 0.92 + Math.random() * 0.17;
+      const duration = buffer.duration / source.playbackRate.value;
+      panner.pan.value = THREE.MathUtils.clamp(pan, -0.88, 0.88);
       const baseVolume = kind === "scream" ? 0.2 : kind === "attack" ? 0.17 : 0.15;
       outputGain.gain.setValueAtTime(
         baseVolume * THREE.MathUtils.clamp(intensity, 0.35, 1.15),
@@ -2850,13 +3030,15 @@ const mount = element<HTMLDivElement>("viewport");
       );
       outputGain.gain.setTargetAtTime(baseVolume * 0.72 * intensity, t + duration * 0.32, 0.22);
       outputGain.gain.exponentialRampToValueAtTime(0.001, t + duration + 0.08);
-      source.connect(throatFilter).connect(throatGain).connect(outputGain);
-      source.connect(mouthFilter).connect(mouthGain).connect(outputGain);
-      source.connect(raspFilter).connect(raspGain).connect(outputGain);
-      outputGain.connect(panner).connect(creatureVocalBus);
+      source.connect(outputGain).connect(panner).connect(creatureVocalBus);
       source.start(t);
       source.stop(t + duration + 0.1);
     }
+
+    // Bake every one-shot while the models are still downloading, so nothing
+    // has to be synthesised or graph-built once the shooting starts.
+    void prepareShotBuffers();
+    void prepareVocalBuffers();
 
     let running = false;
     let squadDeployed = false;
@@ -3836,7 +4018,32 @@ const mount = element<HTMLDivElement>("viewport");
     let frame: number | null = null;
     let qualitySampleTime = 0;
     let qualitySampleFrames = 0;
+    let sustainedSlowSamples = 0;
     let characterAnimationAccumulator = 0;
+
+    /**
+     * Last resort once resolution is already at its floor. Turning the shadow
+     * pass off forces every material to recompile, which costs one visible
+     * hitch — worth paying once to recover a steady frame rate, never worth
+     * paying repeatedly, so this is deliberately one-way.
+     */
+    function dropShadowsForPerformance() {
+      if (!shadowsLive) return;
+      shadowsLive = false;
+      renderer.shadowMap.enabled = false;
+      survivorLight.castShadow = false;
+      scene.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.castShadow = false;
+        object.receiveShadow = false;
+        const materials = Array.isArray(object.material)
+          ? object.material
+          : [object.material];
+        for (const material of materials) {
+          if (material) material.needsUpdate = true;
+        }
+      });
+    }
 
     engineRef.current = {
       start() {
@@ -3914,6 +4121,19 @@ const mount = element<HTMLDivElement>("viewport");
           if (Math.abs(nextPixelRatio - renderPixelRatio) >= 0.045) {
             renderPixelRatio = nextPixelRatio;
             renderer.setPixelRatio(renderPixelRatio);
+          }
+          // Resolution has bottomed out and frames are still long, so the
+          // shadow pass is the next thing to give up. Two consecutive slow
+          // samples required, so one bad stretch does not trigger it.
+          if (
+            shadowsLive &&
+            averageFrameTime > 0.0235 &&
+            renderPixelRatio <= renderProfile.minPixelRatio + 0.01
+          ) {
+            sustainedSlowSamples++;
+            if (sustainedSlowSamples >= 2) dropShadowsForPerformance();
+          } else {
+            sustainedSlowSamples = 0;
           }
           qualitySampleTime = 0;
           qualitySampleFrames = 0;
