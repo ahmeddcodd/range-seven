@@ -322,6 +322,51 @@ const LEVEL_ENCOUNTERS: ReadonlyArray<
   }),
 );
 
+/**
+ * The player cannot move, so pressure is governed by how many infected are
+ * advancing at once rather than by the size of the night's roster. The roster
+ * (and therefore the kill goal) is untouched: survivors are released from a
+ * queue as earlier ones fall, which keeps every night finishable while the
+ * threat still escalates.
+ */
+const CONCURRENT_BASE = 3;
+const CONCURRENT_MIN = 4;
+const CONCURRENT_MAX = 11;
+/** Beat between one infected falling and the next stepping out of the dark. */
+const SPAWN_RELEASE_MS = 620;
+
+/** Rounds scavenged per kill, and the floor every night opens with. */
+const KILL_AMMO_REWARD = 6;
+const HEADSHOT_AMMO_REWARD = 10;
+const NIGHT_RESERVE_FLOOR = 100;
+/** Last-resort rounds handed over only when mag and reserve are both empty. */
+const EMERGENCY_RESERVE = 15;
+
+/**
+ * Seconds a night is guaranteed to open with, scaled to its roster. Banked time
+ * from earlier nights still carries over and stays ahead of this for anyone
+ * clearing quickly, so it only ever rescues a player who is falling behind.
+ */
+function nightTimeFloor(level: number) {
+  return 28 + levelConfig(level).goal * 2.2;
+}
+
+function levelMaxConcurrent(level: number, difficulty: DifficultyKey) {
+  return THREE.MathUtils.clamp(
+    CONCURRENT_BASE + level + DIFFICULTIES[difficulty].maxBonus,
+    CONCURRENT_MIN,
+    CONCURRENT_MAX,
+  );
+}
+
+/**
+ * Shared cadence between any two bites. Without it a surrounded player takes
+ * every attacker's damage in the same instant and dies before reacting.
+ */
+function levelBiteGapMs(level: number) {
+  return Math.max(300, 640 - level * 55);
+}
+
 function levelConfig(level: number) {
   return LEVELS[Math.min(Math.max(level - 1, 0), LEVELS.length - 1)];
 }
@@ -718,6 +763,10 @@ function setWeaponIndex(update: Updater<number>) {
 
 function setTime(update: Updater<number>) {
   time = resolveUpdate(time, update);
+  const safe = Math.max(0, Math.round(time));
+  element("clock-value").textContent =
+    `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
+  element("vitals-hud").classList.toggle("clock-critical", safe <= 15);
 }
 
 function setObjective(update: Updater<string>) {
@@ -755,6 +804,11 @@ function setPlayerHitFlash(update: Updater<number>) {
 
 function setHealth(update: Updater<number>) {
   health = resolveUpdate(health, update);
+  const safe = THREE.MathUtils.clamp(Math.round(health), 0, 100);
+  element("vitals-fill").style.transform = `scaleX(${safe / 100})`;
+  element("vitals-value").textContent = String(safe);
+  element("vitals-track").setAttribute("aria-valuenow", String(safe));
+  element("vitals-hud").classList.toggle("life-critical", safe <= 30);
 }
 
 function setReloading(update: Updater<boolean>) {
@@ -1577,7 +1631,7 @@ const mount = element<HTMLDivElement>("viewport");
       deploymentDelay = 0,
       entry: "street" | "alley" = "street",
     ) {
-      if (!enemyAssetsReady || !zombieTemplate) return;
+      if (!enemyAssetsReady || !zombieTemplate) return false;
       const spawnPoint = findWalkableSpawn(x, z);
       x = spawnPoint.x;
       z = spawnPoint.z;
@@ -1708,6 +1762,7 @@ const mount = element<HTMLDivElement>("viewport");
         flankDirection: id % 2 === 0 ? 1 : -1,
         facingYaw: Math.atan2(camera.position.x - x, camera.position.z - z),
       });
+      return true;
     }
 
     function setEnemyLocomotion(target: TargetState, key: string) {
@@ -2205,7 +2260,6 @@ const mount = element<HTMLDivElement>("viewport");
     musicReverb.buffer = reverbImpulse;
     creatureVocalReverb.buffer = reverbImpulse;
     let noiseBuffer: AudioBuffer | null = null;
-    let reloadNoiseBuffer: AudioBuffer | null = null;
     let musicNoiseBuffer: AudioBuffer | null = null;
     let audioInitialized = false;
     let effectiveAudioEnabled = youtubePlayables.isAudioEnabled;
@@ -2244,20 +2298,6 @@ const mount = element<HTMLDivElement>("viewport");
         const data = noiseBuffer.getChannelData(0);
         for (let i = 0; i < data.length; i++) {
           data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
-        }
-      }
-      if (!reloadNoiseBuffer) {
-        reloadNoiseBuffer = audio.createBuffer(
-          1,
-          Math.floor(audio.sampleRate * 0.42),
-          audio.sampleRate,
-        );
-        const data = reloadNoiseBuffer.getChannelData(0);
-        let mechanicalNoise = 0;
-        for (let i = 0; i < data.length; i++) {
-          const white = Math.random() * 2 - 1;
-          mechanicalNoise = mechanicalNoise * 0.28 + white * 0.72;
-          data[i] = mechanicalNoise * (0.76 + Math.random() * 0.24);
         }
       }
       if (!musicStarted) startHorrorMusic();
@@ -2684,104 +2724,6 @@ const mount = element<HTMLDivElement>("viewport");
       osc.stop(t + duration);
     }
 
-    type ReloadSoundStage =
-      | "release"
-      | "magOut"
-      | "magGrab"
-      | "magIn"
-      | "seat"
-      | "boltPull"
-      | "boltRelease";
-
-    function reloadMechanicalSound(stage: ReloadSoundStage) {
-      if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
-      initAudio();
-      if (!reloadNoiseBuffer) return;
-      const now = audio.currentTime;
-      const stageProfile = {
-        release: [2850, 0.045, 0.3, 1.5],
-        magOut: [690, 0.22, 0.32, 0.72],
-        magGrab: [1260, 0.12, 0.2, 1.04],
-        magIn: [880, 0.2, 0.34, 0.82],
-        seat: [310, 0.095, 0.48, 1.02],
-        boltPull: [1480, 0.23, 0.35, 0.68],
-        boltRelease: [2450, 0.075, 0.52, 1.34],
-      }[stage] as [number, number, number, number];
-      const [frequency, duration, volume, playbackRate] = stageProfile;
-      const noise = audio.createBufferSource();
-      const filter = audio.createBiquadFilter();
-      const gain = audio.createGain();
-      const panner = audio.createStereoPanner();
-      noise.buffer = reloadNoiseBuffer;
-      noise.playbackRate.value = playbackRate;
-      filter.type = stage === "seat" ? "lowpass" : "bandpass";
-      filter.frequency.setValueAtTime(frequency, now);
-      filter.Q.value = stage === "boltPull" || stage === "magOut" ? 1.05 : 1.7;
-      if (stage === "boltPull") {
-        filter.frequency.exponentialRampToValueAtTime(620, now + duration);
-      } else if (stage === "magIn") {
-        filter.frequency.exponentialRampToValueAtTime(1550, now + duration);
-      }
-      panner.pan.value =
-        stage === "magOut" || stage === "magGrab"
-          ? -0.24
-          : stage === "boltPull" || stage === "boltRelease"
-            ? 0.22
-            : 0;
-      gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(volume, now + 0.006);
-      if (duration > 0.1) {
-        gain.gain.setValueAtTime(volume * 0.72, now + duration * 0.52);
-      }
-      gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
-      noise.connect(filter).connect(gain).connect(panner).connect(weaponEffectsBus);
-      noise.start(now, Math.random() * 0.035, duration);
-
-      const resonance = audio.createOscillator();
-      const resonanceGain = audio.createGain();
-      const resonanceFrequency =
-        stage === "seat"
-          ? 155
-          : stage === "boltRelease"
-            ? 760
-            : stage === "release"
-              ? 510
-              : stage === "magOut" || stage === "magIn"
-                ? 215
-                : 330;
-      resonance.type = "triangle";
-      resonance.frequency.setValueAtTime(resonanceFrequency, now);
-      resonance.frequency.exponentialRampToValueAtTime(
-        Math.max(72, resonanceFrequency * 0.38),
-        now + Math.min(duration, 0.095),
-      );
-      resonanceGain.gain.setValueAtTime(volume * 0.58, now);
-      resonanceGain.gain.exponentialRampToValueAtTime(
-        0.001,
-        now + Math.min(duration + 0.025, 0.16),
-      );
-      resonance
-        .connect(resonanceGain)
-        .connect(panner);
-      resonance.start(now);
-      resonance.stop(now + Math.min(duration + 0.03, 0.17));
-
-      if (stage === "release" || stage === "seat" || stage === "boltRelease") {
-        const snap = audio.createBufferSource();
-        const snapFilter = audio.createBiquadFilter();
-        const snapGain = audio.createGain();
-        snap.buffer = reloadNoiseBuffer;
-        snap.playbackRate.value = stage === "seat" ? 0.82 : 1.9;
-        snapFilter.type = stage === "seat" ? "bandpass" : "highpass";
-        snapFilter.frequency.value = stage === "seat" ? 420 : 1900;
-        snapFilter.Q.value = 0.8;
-        snapGain.gain.setValueAtTime(stage === "boltRelease" ? 0.52 : 0.38, now);
-        snapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
-        snap.connect(snapFilter).connect(snapGain).connect(weaponEffectsBus);
-        snap.start(now, 0.008, 0.045);
-      }
-    }
-
     function hitConfirmAudio(headshot: boolean, killed: boolean) {
       if (!effectiveAudioEnabled || youtubePlayables.isPaused) return;
       initAudio();
@@ -2918,6 +2860,14 @@ const mount = element<HTMLDivElement>("viewport");
 
     let running = false;
     let squadDeployed = false;
+    let pendingSpawns: {
+      x: number;
+      z: number;
+      motion: TargetState["motion"];
+      entry: "street" | "alley";
+    }[] = [];
+    let nextSpawnAt = 0;
+    let nextBiteAllowedAt = 0;
     let levelLive = 1;
     let levelKills = 0;
     let scoreLive = 0;
@@ -3067,7 +3017,11 @@ const mount = element<HTMLDivElement>("viewport");
       levelLive++;
       levelKills = 0;
       timeLive += completedDrill.timeBonus;
+      timeLive = Math.max(timeLive, nightTimeFloor(levelLive));
       timeAccumulator = 0;
+      // Never let a night open too poor to clear its own roster.
+      reserveLive = Math.max(reserveLive, NIGHT_RESERVE_FLOOR);
+      setAmmo({ mag: ammoLive, reserve: reserveLive });
       unlocked = Math.min(WEAPONS.length, 1 + Math.floor(levelLive / 2));
       setLevel(levelLive);
       setTime(Math.ceil(timeLive));
@@ -3226,6 +3180,9 @@ const mount = element<HTMLDivElement>("viewport");
       pitch = -0.015;
       buildWeapon(0);
       squadDeployed = false;
+      pendingSpawns = [];
+      nextSpawnAt = 0;
+      nextBiteAllowedAt = 0;
       running = false;
       element<HTMLElement>("perk-screen").hidden = true;
       element<HTMLElement>("drill-announcement").hidden = true;
@@ -3282,6 +3239,9 @@ const mount = element<HTMLDivElement>("viewport");
       pitch = session.pitch;
       buildWeapon(currentWeapon);
       squadDeployed = false;
+      pendingSpawns = [];
+      nextSpawnAt = 0;
+      nextBiteAllowedAt = 0;
       running = false;
       element<HTMLElement>("perk-screen").hidden = true;
       element<HTMLElement>("drill-announcement").hidden = true;
@@ -3368,6 +3328,14 @@ const mount = element<HTMLDivElement>("viewport");
 
     function reload() {
       const weapon = WEAPONS[currentWeapon];
+      // Absolute floor: with no rounds anywhere the player cannot kill, and a
+      // night whose roster is still standing could never end. Only ever fires
+      // at true zero, so it costs nothing to anyone still landing shots.
+      if (running && ammoLive <= 0 && reserveLive <= 0) {
+        reserveLive = EMERGENCY_RESERVE;
+        setAmmo({ mag: ammoLive, reserve: reserveLive });
+        showFeed("SCAVENGED A HANDFUL OF ROUNDS");
+      }
       if (
         reloadingLive ||
         ammoLive >= weapon.ammo ||
@@ -3381,7 +3349,10 @@ const mount = element<HTMLDivElement>("viewport");
       firing = false;
       setReloading(true);
       showFeed("RELOADING");
-      duckMusic(weapon.reloadMs + 140, 0.24);
+      // A light dip still telegraphs being exposed mid-reload. It used to drop
+      // to 0.24 to clear room for the mechanical foley; with that gone, a duck
+      // that deep would just leave an audible hole.
+      duckMusic(weapon.reloadMs + 140, 0.72);
       if (
         currentWeapon === 0 &&
         importedWeaponReady &&
@@ -3391,20 +3362,6 @@ const mount = element<HTMLDivElement>("viewport");
         importedIdleAction?.fadeOut(0.06);
         importedReloadAction.reset().fadeIn(0.06).play();
       }
-      const reloadSound = (progress: number, stage: ReloadSoundStage) => {
-        gameTimeout(() => {
-          if (token === reloadToken && reloadingLive) {
-            reloadMechanicalSound(stage);
-          }
-        }, weapon.reloadMs * progress);
-      };
-      reloadSound(0.11, "release");
-      reloadSound(0.22, "magOut");
-      reloadSound(0.42, "magGrab");
-      reloadSound(0.52, "magIn");
-      reloadSound(0.69, "seat");
-      reloadSound(0.81, "boltPull");
-      reloadSound(0.9, "boltRelease");
       gameTimeout(() => {
         if (token !== reloadToken || !reloadingLive) return;
         const needed = weapon.ammo - ammoLive;
@@ -3440,6 +3397,7 @@ const mount = element<HTMLDivElement>("viewport");
       targets.forEach((target) => targetRoot.remove(target.group));
       targets.clear();
       squadDeployed = false;
+      pendingSpawns = [];
       ghostActive = false;
       renderPerkStatus();
       tone(520, 0.18, 0.11);
@@ -3538,6 +3496,10 @@ const mount = element<HTMLDivElement>("viewport");
           timeLive += 1;
           setTime(Math.ceil(timeLive));
         }
+        // Scavenged rounds. Without this the run goes bankrupt long before the
+        // final night, leaving nothing to shoot with and the level unwinnable.
+        reserveLive += zone === "head" ? HEADSHOT_AMMO_REWARD : KILL_AMMO_REWARD;
+        setAmmo({ mag: ammoLive, reserve: reserveLive });
         scoreLive += points;
         setScore(scoreLive);
         setStreak(streakLive);
@@ -3576,6 +3538,9 @@ const mount = element<HTMLDivElement>("viewport");
         tone(120, 0.06, 0.05);
         showFeed("EMPTY // RELOAD");
         firing = false;
+        // Guarded internally, so this both auto-reloads on a dry mag and
+        // reaches the emergency floor when the reserve is gone too.
+        reload();
         return;
       }
       ammoLive--;
@@ -3635,12 +3600,38 @@ const mount = element<HTMLDivElement>("viewport");
           Math.min(Math.max(levelLive - 1, 0), LEVEL_ENCOUNTERS.length - 1)
         ];
       squadDeployed = true;
-      const spawnInterval = Math.max(150, 520 - levelLive * 58);
-      encounter.slice(Math.min(levelKills, encounter.length)).forEach((slot, index) => {
-        createTarget(slot.x, slot.z, slot.motion, index * spawnInterval, slot.entry);
-      });
+      // The whole roster is queued; releaseQueuedInfected drip-feeds it so the
+      // street never holds more than the night's concurrency allowance.
+      pendingSpawns = encounter.slice(Math.min(levelKills, encounter.length));
+      nextSpawnAt = 0;
       setObjective(levelObjective(levelLive));
       showFeed(`${encounter.length - levelKills} infected are still moving`);
+    }
+
+    function livingTargetCount() {
+      let alive = 0;
+      for (const target of targets.values()) if (!target.dead) alive++;
+      return alive;
+    }
+
+    function releaseQueuedInfected(elapsed: number) {
+      if (!running || pendingSpawns.length === 0 || !enemyAssetsReady) return;
+      if (elapsed < nextSpawnAt) return;
+      const allowance = levelMaxConcurrent(levelLive, difficultyRef.current);
+      // Open the night immediately at full allowance, then trickle one at a
+      // time so kills are what earn breathing room.
+      let released = 0;
+      while (pendingSpawns.length > 0 && livingTargetCount() < allowance) {
+        const slot = pendingSpawns[0];
+        if (!createTarget(slot.x, slot.z, slot.motion, 0, slot.entry)) break;
+        pendingSpawns.shift();
+        released++;
+        if (released >= allowance) break;
+      }
+      if (released > 0) {
+        nextSpawnAt =
+          elapsed + Math.max(220, SPAWN_RELEASE_MS - levelLive * 45);
+      }
     }
 
     function isWalkableWorldPosition(x: number, z: number, padding = 0.42) {
@@ -3931,6 +3922,7 @@ const mount = element<HTMLDivElement>("viewport");
 
       if (running) {
         if (firing) shoot();
+        releaseQueuedInfected(elapsed);
         if (comboLive > 1 && elapsed - lastKillAt > 1900) {
           comboLive = 1;
           setCombo(1);
@@ -4205,7 +4197,13 @@ const mount = element<HTMLDivElement>("viewport");
           target.facingYaw = dampAngle(target.facingYaw, playerFacingYaw, 14, dt);
           target.group.rotation.y = target.facingYaw;
           setEnemyLocomotion(target, "idle");
-          if (elapsed >= (target.nextAttackAt ?? 0)) {
+          if (
+            elapsed >= (target.nextAttackAt ?? 0) &&
+            elapsed >= nextBiteAllowedAt
+          ) {
+            // Claim the shared bite slot so a ring of infected takes turns
+            // instead of landing every bite on the same frame.
+            nextBiteAllowedAt = elapsed + levelBiteGapMs(levelLive);
             const attackKey =
               target.motion === "crawler"
                 ? "bite"

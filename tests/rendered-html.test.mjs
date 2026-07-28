@@ -53,6 +53,10 @@ test("builds the complete static Nightfall Seven game shell", async () => {
   assert.match(html, /class="score-hud"/);
   assert.doesNotMatch(html, /class="topbar"|id="level-value"|id="time-value"/);
   assert.doesNotMatch(html, /id="accuracy-value"|id="streak-value"|id="health-panel"/);
+  assert.match(html, /id="vitals-hud"/);
+  assert.match(html, /id="clock-value"/);
+  assert.match(html, /id="vitals-fill"/);
+  assert.match(html, /id="vitals-value"/);
   assert.match(html, /id="drill-announcement"/);
   assert.match(html, /CHOOSE WHAT KEEPS YOU ALIVE/);
   assert.match(html, /data-perk="ammo"/);
@@ -103,15 +107,19 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /!track\.name\.startsWith\("Root\."\)/);
   assert.match(source, /aim\.set\(0, 0\)/);
   assert.doesNotMatch(source, /let aimingLive|let adsBlend/);
-  assert.match(source, /function reloadMechanicalSound/);
   assert.match(source, /const weaponEffectsBus = audio\.createGain\(\)/);
   assert.match(source, /function duckMusic/);
-  assert.match(source, /duckMusic\(weapon\.reloadMs \+ 140, 0\.24\)/);
+  // The reload is silent: the mechanical foley and every trace of its noise
+  // buffer are gone, and the music only dips lightly instead of clearing room
+  // for a sound that no longer plays.
+  assert.doesNotMatch(
+    source,
+    /reloadMechanicalSound|ReloadSoundStage|reloadNoiseBuffer|reloadSound\(/,
+  );
+  assert.doesNotMatch(source, /"magOut"|"boltPull"|"boltRelease"|"magGrab"/);
+  assert.match(source, /duckMusic\(weapon\.reloadMs \+ 140, 0\.72\)/);
   assert.match(source, /function hitConfirmAudio/);
   assert.match(source, /pulseShotFlash\(\)/);
-  assert.match(source, /reloadSound\(0\.22, "magOut"\)/);
-  assert.match(source, /reloadSound\(0\.69, "seat"\)/);
-  assert.match(source, /reloadSound\(0\.9, "boltRelease"\)/);
   assert.match(source, /zombie\.glb/);
   assert.doesNotMatch(source, /enemy-punk\.glb|enemy-glock\.glb/);
   assert.match(source, /cloneSkeleton/);
@@ -124,6 +132,27 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /alleyEntry \? 360 : 620/);
   assert.match(source, /entry === "alley" \? 720 : 1250/);
   assert.match(source, /function deployLevelSquad/);
+  // Concurrency, not roster size, governs pressure: every night keeps its full
+  // kill goal but only releases a capped number of infected at a time.
+  assert.match(source, /function levelMaxConcurrent/);
+  assert.match(source, /function releaseQueuedInfected/);
+  assert.match(source, /function livingTargetCount/);
+  assert.match(source, /pendingSpawns = encounter\.slice/);
+  assert.match(source, /livingTargetCount\(\) < allowance/);
+  assert.doesNotMatch(source, /const spawnInterval = Math\.max\(150, 520/);
+  // A ring of infected must take turns rather than landing every bite at once.
+  assert.match(source, /function levelBiteGapMs/);
+  assert.match(source, /elapsed >= nextBiteAllowedAt/);
+  assert.match(source, /nextBiteAllowedAt = elapsed \+ levelBiteGapMs\(levelLive\)/);
+  // Ammo and clock floors keep every night finishable.
+  assert.match(source, /KILL_AMMO_REWARD/);
+  assert.match(source, /HEADSHOT_AMMO_REWARD/);
+  assert.match(source, /reserveLive = Math\.max\(reserveLive, NIGHT_RESERVE_FLOOR\)/);
+  assert.match(source, /function nightTimeFloor/);
+  assert.match(source, /timeLive = Math\.max\(timeLive, nightTimeFloor\(levelLive\)\)/);
+  assert.match(source, /reserveLive = EMERGENCY_RESERVE/);
+  assert.match(source, /element\("clock-value"\)/);
+  assert.match(source, /element\("vitals-fill"\)\.style\.transform = `scaleX/);
   assert.match(source, /function findWalkableSpawn/);
   assert.match(source, /function isWalkableWorldPosition/);
   assert.match(source, /function advanceEnemyTowardPlayer/);
