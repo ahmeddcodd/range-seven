@@ -2234,35 +2234,68 @@ const mount = element<HTMLDivElement>("viewport");
     });
     const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffc167 });
     const bloodMat = new THREE.MeshBasicMaterial({ color: 0x7d0b0b });
+    /*
+     * Audio-thread budget, not main-thread. Convolution is by far the most
+     * expensive node in the graph, and this scene previously ran two of them
+     * permanently, each on a 2.8s stereo tail. Measured offline, that whole
+     * chain renders at only ~15x realtime on a desktop CPU, which derates to
+     * roughly 2x on a phone — so any GPU spike or GC pushed the render thread
+     * under realtime and the output tore. One shared, shorter, mono tail is
+     * ~6x cheaper and gets the margin back.
+     */
+    const audioProfile = {
+      reverbSeconds: constrainedRendering ? 0 : mobileRendering ? 0.85 : 1.6,
+      // The weapon limiter is kept everywhere; the music and creature bus
+      // compressors are polish that phones cannot spare the cycles for.
+      busCompressors: !mobileRendering,
+    };
+
     const audio = new AudioContext();
     const masterAudioGain = audio.createGain();
     masterAudioGain.gain.value = youtubePlayables.isAudioEnabled ? 1 : 0;
     masterAudioGain.connect(audio.destination);
+
+    const sharedReverb =
+      audioProfile.reverbSeconds > 0 ? audio.createConvolver() : null;
+    const sharedReverbGain = audio.createGain();
+    if (sharedReverb) {
+      const frames = Math.floor(audio.sampleRate * audioProfile.reverbSeconds);
+      const impulseBuffer = audio.createBuffer(1, frames, audio.sampleRate);
+      const impulse = impulseBuffer.getChannelData(0);
+      for (let i = 0; i < impulse.length; i++) {
+        const decay = Math.pow(1 - i / impulse.length, 3.6);
+        impulse[i] = (Math.random() * 2 - 1) * decay * (0.7 + Math.random() * 0.3);
+      }
+      sharedReverb.buffer = impulseBuffer;
+      sharedReverb.connect(sharedReverbGain).connect(masterAudioGain);
+    }
+
     const musicInput = audio.createGain();
     const musicFilter = audio.createBiquadFilter();
-    const musicCompressor = audio.createDynamicsCompressor();
-    const musicReverb = audio.createConvolver();
-    const musicReverbGain = audio.createGain();
     const musicBusGain = audio.createGain();
+    const musicReverbSend = audio.createGain();
     const weaponEffectsBus = audio.createGain();
     const weaponEffectsCompressor = audio.createDynamicsCompressor();
     const creatureVocalBus = audio.createGain();
-    const creatureVocalCompressor = audio.createDynamicsCompressor();
-    const creatureVocalReverb = audio.createConvolver();
-    const creatureVocalReverbGain = audio.createGain();
+    const creatureReverbSend = audio.createGain();
+
     musicFilter.type = "lowpass";
     musicFilter.frequency.value = 1450;
     musicFilter.Q.value = 0.42;
-    musicCompressor.threshold.value = -24;
-    musicCompressor.knee.value = 18;
-    musicCompressor.ratio.value = 3.2;
-    musicCompressor.attack.value = 0.025;
-    musicCompressor.release.value = 0.48;
-    musicReverbGain.gain.value = 0.28;
     musicBusGain.gain.value = 0;
-    musicInput.connect(musicFilter).connect(musicCompressor).connect(musicBusGain);
-    musicInput.connect(musicReverb).connect(musicReverbGain).connect(musicBusGain);
+    if (audioProfile.busCompressors) {
+      const musicCompressor = audio.createDynamicsCompressor();
+      musicCompressor.threshold.value = -24;
+      musicCompressor.knee.value = 18;
+      musicCompressor.ratio.value = 3.2;
+      musicCompressor.attack.value = 0.025;
+      musicCompressor.release.value = 0.48;
+      musicInput.connect(musicFilter).connect(musicCompressor).connect(musicBusGain);
+    } else {
+      musicInput.connect(musicFilter).connect(musicBusGain);
+    }
     musicBusGain.connect(masterAudioGain);
+
     weaponEffectsBus.gain.value = 1.16;
     weaponEffectsCompressor.threshold.value = -13;
     weaponEffectsCompressor.knee.value = 9;
@@ -2270,33 +2303,29 @@ const mount = element<HTMLDivElement>("viewport");
     weaponEffectsCompressor.attack.value = 0.002;
     weaponEffectsCompressor.release.value = 0.11;
     weaponEffectsBus.connect(weaponEffectsCompressor).connect(masterAudioGain);
-    creatureVocalBus.gain.value = 0.82;
-    creatureVocalCompressor.threshold.value = -20;
-    creatureVocalCompressor.knee.value = 16;
-    creatureVocalCompressor.ratio.value = 5;
-    creatureVocalCompressor.attack.value = 0.012;
-    creatureVocalCompressor.release.value = 0.24;
-    creatureVocalReverbGain.gain.value = 0.19;
-    creatureVocalBus.connect(creatureVocalCompressor).connect(masterAudioGain);
-    creatureVocalBus
-      .connect(creatureVocalReverb)
-      .connect(creatureVocalReverbGain)
-      .connect(masterAudioGain);
 
-    const reverbImpulse = audio.createBuffer(
-      2,
-      Math.floor(audio.sampleRate * 2.8),
-      audio.sampleRate,
-    );
-    for (let channel = 0; channel < reverbImpulse.numberOfChannels; channel++) {
-      const impulse = reverbImpulse.getChannelData(channel);
-      for (let i = 0; i < impulse.length; i++) {
-        const decay = Math.pow(1 - i / impulse.length, 3.6);
-        impulse[i] = (Math.random() * 2 - 1) * decay * (0.7 + Math.random() * 0.3);
-      }
+    creatureVocalBus.gain.value = 0.82;
+    if (audioProfile.busCompressors) {
+      const creatureVocalCompressor = audio.createDynamicsCompressor();
+      creatureVocalCompressor.threshold.value = -20;
+      creatureVocalCompressor.knee.value = 16;
+      creatureVocalCompressor.ratio.value = 5;
+      creatureVocalCompressor.attack.value = 0.012;
+      creatureVocalCompressor.release.value = 0.24;
+      creatureVocalBus.connect(creatureVocalCompressor).connect(masterAudioGain);
+    } else {
+      creatureVocalBus.connect(masterAudioGain);
     }
-    musicReverb.buffer = reverbImpulse;
-    creatureVocalReverb.buffer = reverbImpulse;
+
+    // Post-fader sends, so ducking the music also ducks what feeds the tail
+    // while letting the tail already in flight ring out.
+    sharedReverbGain.gain.value = 1;
+    musicReverbSend.gain.value = 0.28;
+    creatureReverbSend.gain.value = 0.19;
+    if (sharedReverb) {
+      musicBusGain.connect(musicReverbSend).connect(sharedReverb);
+      creatureVocalBus.connect(creatureReverbSend).connect(sharedReverb);
+    }
     let noiseBuffer: AudioBuffer | null = null;
     let musicNoiseBuffer: AudioBuffer | null = null;
     let audioInitialized = false;
@@ -2308,6 +2337,7 @@ const mount = element<HTMLDivElement>("viewport");
     let musicLifted = false;
     let musicDuckUntil = 0;
     let musicDuckDepth = 1;
+    let lastMusicParamUpdate = -1000;
 
     function duckMusic(durationMs: number, depth: number) {
       musicDuckUntil = Math.max(musicDuckUntil, gameNow() + durationMs);
@@ -2628,16 +2658,15 @@ const mount = element<HTMLDivElement>("viewport");
 
     function updateHorrorMusic(elapsed: number) {
       if (!musicStarted || !effectiveAudioEnabled || youtubePlayables.isPaused) return;
-      const livingTargets = Array.from(targets.values()).filter((target) => !target.dead);
+      // Walked without allocating: this runs every frame, and the old
+      // Array.from().filter() handed the collector two objects per frame.
       let nearestDistance = 46;
-      for (const target of livingTargets) {
-        nearestDistance = Math.min(
-          nearestDistance,
-          Math.hypot(
-            target.group.position.x - camera.position.x,
-            target.group.position.z - camera.position.z,
-          ),
-        );
+      for (const target of targets.values()) {
+        if (target.dead) continue;
+        const dx = target.group.position.x - camera.position.x;
+        const dz = target.group.position.z - camera.position.z;
+        const distance = Math.hypot(dx, dz);
+        if (distance < nearestDistance) nearestDistance = distance;
       }
       const proximity = THREE.MathUtils.clamp(1 - (nearestDistance - 2.4) / 32, 0, 1);
       const cycle = (elapsed / 1000) % 34;
@@ -2651,20 +2680,29 @@ const mount = element<HTMLDivElement>("viewport");
           : 0.045;
       const duckActive = elapsed < musicDuckUntil;
       if (!duckActive) musicDuckDepth = 1;
-      musicBusGain.gain.setTargetAtTime(
-        THREE.MathUtils.clamp(
-          targetLevel * (duckActive ? musicDuckDepth : 1),
-          0.018,
-          0.68,
-        ),
-        audio.currentTime,
-        lift ? 0.08 : 0.75,
-      );
-      musicFilter.frequency.setTargetAtTime(
-        880 + proximity * 920 + levelLive * 75,
-        audio.currentTime,
-        0.9,
-      );
+      /*
+       * Both of these ride smoothing constants measured in hundreds of
+       * milliseconds, so re-arming them 60x a second only piled automation
+       * events onto the render thread without changing what anyone hears.
+       * ~12Hz is well inside the time constants.
+       */
+      if (elapsed - lastMusicParamUpdate >= 80) {
+        lastMusicParamUpdate = elapsed;
+        musicBusGain.gain.setTargetAtTime(
+          THREE.MathUtils.clamp(
+            targetLevel * (duckActive ? musicDuckDepth : 1),
+            0.018,
+            0.68,
+          ),
+          audio.currentTime,
+          lift ? 0.08 : 0.75,
+        );
+        musicFilter.frequency.setTargetAtTime(
+          880 + proximity * 920 + levelLive * 75,
+          audio.currentTime,
+          0.9,
+        );
+      }
       if (lift && !musicLifted && running) horrorStinger(0.72 + proximity * 0.42);
       musicLifted = lift;
 

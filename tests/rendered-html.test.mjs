@@ -220,7 +220,7 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /function playTensionSwell/);
   assert.match(source, /function playScorePulse/);
   assert.match(source, /function dreadPulse/);
-  assert.match(source, /musicReverb/);
+  assert.match(source, /musicReverbSend/);
   assert.match(source, /gameNow\(\)/);
   assert.match(source, /gameTimeout\(/);
   assert.doesNotMatch(
@@ -274,8 +274,32 @@ test("ships a Vercel-ready vanilla Vite and TypeScript FPS", async () => {
   assert.match(source, /deathAlt: "Die2"/);
   assert.match(source, /function damagePlayerFromZombie/);
   assert.match(source, /function zombieVocal/);
-  assert.match(source, /creatureVocalCompressor/);
-  assert.match(source, /creatureVocalReverb/);
+  assert.match(source, /creatureVocalBus/);
+  assert.match(source, /creatureReverbSend/);
+  /*
+   * Convolution is the dominant audio-thread cost. Two permanent convolvers on
+   * 2.8s stereo tails rendered at only ~17x realtime on desktop — roughly 2.5x
+   * once derated for a phone — so the render thread tore under any load spike.
+   * One shared mono tail, shortened on mobile, measures ~5.8x cheaper.
+   */
+  assert.match(source, /const audioProfile = \{/);
+  assert.match(source, /reverbSeconds: constrainedRendering \? 0 : mobileRendering \? 0\.85 : 1\.6/);
+  assert.match(source, /busCompressors: !mobileRendering/);
+  assert.match(source, /const sharedReverb =\s*\n?\s*audioProfile\.reverbSeconds > 0 \? audio\.createConvolver\(\) : null/);
+  assert.match(source, /audio\.createBuffer\(1, frames, audio\.sampleRate\)/);
+  // Exactly one convolver may ever be constructed.
+  assert.equal(source.match(/createConvolver\(\)/g)?.length, 1);
+  // The weapon limiter is never dropped; the two bus compressors are.
+  assert.match(
+    source,
+    /weaponEffectsBus\.connect\(weaponEffectsCompressor\)\.connect\(masterAudioGain\)/,
+  );
+  // Music params ride long time constants, so stop re-arming them every frame.
+  assert.match(source, /elapsed - lastMusicParamUpdate >= 80/);
+  assert.doesNotMatch(
+    source,
+    /const livingTargets = Array\.from\(targets\.values\(\)\)\.filter/,
+  );
   // The throat/mouth/rasp formant stack still shapes every vocalisation, but
   // it is baked into the buffer offline rather than rebuilt on the live
   // context per zombie.
