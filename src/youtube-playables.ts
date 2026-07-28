@@ -36,6 +36,8 @@ type ScheduledTask = {
   nativeId: ReturnType<typeof setTimeout> | null;
 };
 
+const CLOUD_RESTORE_DEADLINE_MS = 2400;
+
 const blockedInteractionEvents = [
   "click",
   "contextmenu",
@@ -210,7 +212,18 @@ class YouTubePlayablesRuntime {
   }
 
   async getCloudData() {
-    return this.cloudLoadPromise;
+    let deadlineId: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const restoreDeadline = new Promise<null>((resolve) => {
+        deadlineId = setTimeout(
+          () => resolve(null),
+          CLOUD_RESTORE_DEADLINE_MS,
+        );
+      });
+      return await Promise.race([this.cloudLoadPromise, restoreDeadline]);
+    } finally {
+      if (deadlineId !== null) clearTimeout(deadlineId);
+    }
   }
 
   markCloudRestoreApplied() {

@@ -1,9 +1,10 @@
-# Range Seven
+# Nightfall Seven
 
-Range Seven is an original browser-based tactical FPS built with Three.js,
-Vite, and TypeScript. It features five escalating shooting drills, animated weapons,
-fixed enemy encounters, cover-aware enemy AI, desktop controls, and mobile
-touch controls.
+Nightfall Seven is an original browser-based zombie survival FPS built with
+Three.js, Vite, and TypeScript. Hold a fixed position in a smoke-filled quarantine
+district through six escalating nights. Animated shamblers, runners, crawlers, and
+brutes advance through the street while weapon recoil, headshots, blood effects,
+lighting, audio, and perks build an increasingly intense survival loop.
 
 ## Play locally
 
@@ -23,8 +24,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### Desktop
 
-- `WASD` — move
-- Mouse — look
+- Mouse — steer
 - Left click — fire
 - Right click — aim down sights
 - `R` — reload
@@ -32,11 +32,11 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### Mobile
 
-- Left stick — move
-- Drag the right side — look
-- Hold `FIRE` — fire
-- Hold `ADS` — aim down sights
-- `R` — reload
+- Hold anywhere — aim and fire
+- Drag while holding — steer
+
+The survivor stays in place on both desktop and mobile; survival depends on
+target priority, accuracy, reload timing, and perk choices.
 
 ## Production
 
@@ -53,7 +53,7 @@ bundle. YouTube pause/resume events control the simulation, rendering, input,
 animations, timers, and Web Audio lifecycle. YouTube's audio setting is the
 master audio authority, and build assets use package-safe relative paths.
 
-Player profile data and active drill checkpoints use YouTube Playables cloud
+Player profile data and active-night checkpoints use YouTube Playables cloud
 saves exclusively. The game does not use local storage, IndexedDB, cookies, or
 another browser persistence fallback.
 
@@ -69,8 +69,7 @@ another browser persistence fallback.
 ## Model credits
 
 - FPS AKM rig by J-Toastie
-- Punk character by Quaternius
-- Rigged Glock 19 by PuKkBuMXDD
+- Zombie character and animation set by bachosoftdesign
 
 Review the original asset licenses before redistributing the included models
 outside this project.

@@ -5,17 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta
       name="description"
-      content="Range Seven is an original Three.js tactical FPS for desktop and mobile."
+      content="Nightfall Seven is a dark Three.js zombie survival FPS for desktop and mobile."
     />
-    <meta property="og:title" content="Range Seven — Tactical FPS" />
+    <meta property="og:title" content="Nightfall Seven — Zombie Survival FPS" />
     <meta
       property="og:description"
-      content="Five escalating tactical shooting drills with animated weapons and cover-aware enemies."
+      content="Six escalating survival levels against animated zombie hordes in a fogbound city."
     />
     <meta property="og:image" content="./og.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="./favicon.svg" />
-    <title>Range Seven — Tactical FPS</title>
+    <title>Nightfall Seven — Zombie Survival FPS</title>
     <script src="https://www.youtube.com/game_api/v1"></script>
   </head>
   <body>
@@ -26,34 +26,36 @@
 
       <header class="topbar" aria-label="Mission status">
         <div class="brand">
-          <span class="brand-mark">R//7</span>
-          <span>BLACKSITE <b>SEVEN</b></span>
+          <span class="brand-mark">VII</span>
+          <span>NIGHTFALL <b>SEVEN</b></span>
         </div>
         <div class="level-block">
-          <span>DRILL</span>
+          <span>NIGHT</span>
           <strong id="level-value">01</strong>
           <i></i>
-          <small id="objective-value">ZEROING // 5 HOSTILES</small>
+          <small id="objective-value">FIRST KNOCK — 5 STILL MOVING</small>
         </div>
         <div id="timer" class="timer">
-          <small>TIME</small>
+          <small>UNTIL DAWN</small>
           <strong id="time-value">00:45</strong>
         </div>
       </header>
 
-      <aside class="score-panel" aria-label="Score">
-        <span>SCORE</span>
-        <strong id="score-value">000000</strong>
-        <div class="streak"><i id="streak-meter"></i></div>
-        <small id="streak-value">BUILD STREAK</small>
-        <em id="accuracy-value">100% ACCURACY</em>
-      </aside>
+      <div class="survival-hud" aria-label="Survival status">
+        <aside class="score-panel" aria-label="Score">
+          <span>SCORE</span>
+          <strong id="score-value">000000</strong>
+          <em id="accuracy-value">100% ACCURACY</em>
+          <div class="streak"><i id="streak-meter"></i></div>
+          <small id="streak-value">BUILD STREAK</small>
+        </aside>
 
-      <aside id="health-panel" class="health-panel">
-        <span>ARMOR</span>
-        <div><i id="health-meter"></i></div>
-        <strong id="health-value">100</strong>
-      </aside>
+        <aside id="health-panel" class="health-panel" aria-label="Health">
+          <span>LIFE</span>
+          <strong id="health-value">100</strong>
+          <div><i id="health-meter"></i></div>
+        </aside>
+      </div>
 
       <div class="compass" aria-hidden="true">
         <i></i><span>W</span><b>348</b><strong>N</strong><b>012</b><span>E</span>
@@ -65,10 +67,10 @@
       <div id="crosshair" class="crosshair" aria-hidden="true">
         <i></i><i></i><i></i><i></i><b></b>
       </div>
-      <div id="kill-feed" class="kill-feed">STANDBY</div>
+      <div id="kill-feed" class="kill-feed">LISTEN...</div>
       <div id="combo-badge" class="combo-badge">
         <strong id="combo-value">x1.00</strong>
-        <span>FLOW</span>
+        <span>FRENZY</span>
       </div>
 
       <section
@@ -77,10 +79,10 @@
         aria-live="assertive"
         hidden
       >
-        <span>DRILL <b id="announcement-level">01</b></span>
-        <h2 id="announcement-title">ZEROING</h2>
-        <div><i></i><strong id="announcement-enemies">5</strong><small>HOSTILES</small><i></i></div>
-        <p id="announcement-detail">ESTABLISH YOUR SIGHTLINE</p>
+        <span>NIGHT <b id="announcement-level">01</b></span>
+        <h2 id="announcement-title">FIRST KNOCK</h2>
+        <div><i></i><strong id="announcement-enemies">5</strong><small>INFECTED</small><i></i></div>
+        <p id="announcement-detail">THE STREET IS NOT EMPTY</p>
       </section>
 
       <section
@@ -92,9 +94,9 @@
         hidden
       >
         <div class="perk-panel">
-          <span id="perk-eyebrow" class="eyebrow">DRILL 01 SECURED</span>
-          <h2 id="perk-title">CHOOSE A FIELD PERK</h2>
-          <p>Pick one tactical advantage before the next hostile squad deploys.</p>
+          <span id="perk-eyebrow" class="eyebrow">NIGHT 01 SURVIVED</span>
+          <h2 id="perk-title">CHOOSE WHAT KEEPS YOU ALIVE</h2>
+          <p>Take one supply before the next horde finds the light.</p>
           <div class="perk-grid">
             <button data-perk="ammo">
               <span class="perk-icon">+</span>
@@ -103,26 +105,25 @@
             </button>
             <button data-perk="ghost">
               <span class="perk-icon">◈</span>
-              <b>GHOST MODE</b>
-              <small>HARDER TO HIT NEXT DRILL</small>
+              <b>PHASE WARD</b>
+              <small>CHANCE TO EVADE A BITE</small>
             </button>
             <button data-perk="heal">
               <span class="perk-icon">✚</span>
-              <b>FIELD MEDKIT</b>
-              <small>RESTORE 40 ARMOR</small>
+              <b>TRAUMA KIT</b>
+              <small>RESTORE 40 VITALS</small>
             </button>
           </div>
-          <small class="perk-hint">TAP A PERK TO CONTINUE</small>
+          <small class="perk-hint">CHOOSE QUICKLY — THEY ARE COMING</small>
         </div>
       </section>
 
       <aside id="perk-status" class="perk-status" aria-label="Active perks" hidden></aside>
 
-      <section class="weapon-hud" aria-label="Weapon and ammunition">
-        <div class="weapon-name">
-          <span id="weapon-code">AR</span>
-          <strong id="weapon-name">AKM</strong>
-          <small id="weapon-mode">FULL AUTO</small>
+      <section class="weapon-hud" aria-label="Bullets remaining">
+        <div class="ammo-heading">
+          <strong>BULLETS</strong>
+          <small>LOADED / SPARE</small>
         </div>
         <div id="ammo-panel" class="ammo">
           <strong id="ammo-mag">30</strong>
@@ -131,8 +132,8 @@
         <button id="reload-button" class="reload-chip">R&nbsp;&nbsp;RELOAD</button>
       </section>
 
-      <div class="weapon-rail" aria-label="Available weapons">
-        <button class="weapon-slot active" data-weapon="0" aria-label="AKM">
+      <div class="weapon-rail" aria-label="Available equipment" hidden>
+        <button class="weapon-slot active" data-weapon="0" aria-label="Primary equipment">
           <span>1</span><b>AR</b>
         </button>
         <button class="weapon-slot" data-weapon="1" aria-label="VOLT-9, locked" disabled>
@@ -150,61 +151,60 @@
         hidden
       >
         <div class="touch-steer-hint" aria-hidden="true">
-          <i></i><span>HOLD TO FIRE · DRAG TO STEER</span>
+          <i></i><span>HOLD TO AIM + FIRE · DRAG TO STEER</span>
         </div>
       </div>
       <div id="auto-move-indicator" class="auto-move-indicator" hidden>
-        <i></i><span>AUTO ADVANCE</span><i></i>
+        <i></i><span>HOLD POSITION</span><i></i>
       </div>
 
       <section id="start-screen" class="start-screen">
         <div class="scanline"></div>
-        <div class="eyebrow">CLIFFSIDE QUALIFICATION // 07</div>
-        <h1>RANGE<span>SEVEN</span></h1>
+        <div class="eyebrow">QUARANTINE DISTRICT // 07</div>
+        <h1>NIGHTFALL<span>SEVEN</span></h1>
         <p>
-          Track pop-ups, strafers, hover patterns, and dash targets across a
-          fast tactical course before the clock expires.
+          Hold the final streetlight until dawn. They scream first. Then they run.
         </p>
         <div class="difficulty-select" role="radiogroup" aria-label="Difficulty">
           <button data-difficulty="recruit" role="radio" aria-checked="false">
-            <b>RECRUIT</b><small>Forgiving timing</small>
+            <b>WANDERER</b><small>Slower infected</small>
           </button>
           <button data-difficulty="operator" class="active" role="radio" aria-checked="true">
-            <b>OPERATOR</b><small>Balanced pressure</small>
+            <b>SURVIVOR</b><small>Relentless pressure</small>
           </button>
           <button data-difficulty="elite" role="radio" aria-checked="false">
-            <b>ELITE</b><small>Fast and punishing</small>
+            <b>NIGHTMARE</b><small>Fast and merciless</small>
           </button>
         </div>
         <div class="briefing">
           <div><span>01</span><b>AIM</b><small id="aim-help">MOVE MOUSE</small></div>
           <div><span>02</span><b>FIRE</b><small id="fire-help">LEFT CLICK</small></div>
-          <div><span>03</span><b>MOVE</b><small id="move-help">WASD KEYS</small></div>
+          <div><span>03</span><b>HOLD GROUND</b><small id="move-help">NO MOVEMENT</small></div>
         </div>
         <button id="deploy-button" class="deploy-button">
-          <span>ENTER BLACKSITE</span><i>▶</i>
+          <span>BEGIN THE NIGHT</span><i>▶</i>
         </button>
-        <small class="legal">ORIGINAL TACTICAL TRAINING EXPERIENCE · HEADPHONES RECOMMENDED</small>
+        <small class="legal">ORIGINAL SURVIVAL EXPERIENCE · HEADPHONES RECOMMENDED</small>
       </section>
 
       <section id="result-screen" class="result-screen" hidden>
-        <span id="result-eyebrow" class="eyebrow">QUALIFICATION COMPLETE</span>
+        <span id="result-eyebrow" class="eyebrow">THE NIGHT IS OVER</span>
         <h2 id="result-score">0</h2>
-        <p>FINAL SCORE</p>
+        <p>SURVIVAL SCORE</p>
         <div class="result-grid">
-          <div><span>DRILL</span><strong id="result-level">1</strong></div>
+          <div><span>NIGHT</span><strong id="result-level">1</strong></div>
           <div><span>BEST STREAK</span><strong id="result-streak">0</strong></div>
           <div><span>ACCURACY</span><strong id="result-accuracy">100%</strong></div>
           <div><span>RATING</span><strong id="result-rating">C</strong></div>
         </div>
-        <button id="restart-button" class="deploy-button">RUN IT AGAIN</button>
-        <button id="change-difficulty" class="change-difficulty">CHANGE DIFFICULTY</button>
+        <button id="restart-button" class="deploy-button">FACE THE NIGHT AGAIN</button>
+        <button id="change-difficulty" class="change-difficulty">CHANGE NIGHTMARE</button>
       </section>
 
       <footer class="footer-strip">
-        <span>BLACKSITE LIVE</span><i></i>
-        <span id="difficulty-label">OPERATOR</span>
-        <span>WIND 00.4</span><span>CAL 5.56</span><b>SAFETY OFF</b>
+        <span>DISTRICT 07</span><i></i>
+        <span id="difficulty-label">SURVIVOR</span>
+        <span>03:17 AM</span><span>CAL 7.62</span><b>NO SIGNAL</b>
       </footer>
     </main>
 
