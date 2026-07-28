@@ -9,6 +9,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "pack:playables": "npm run build && node scripts/pack-playables.mjs",
     "test": "npm run build && node --test tests/rendered-html.test.mjs"
   },
   "dependencies": {

@@ -48,6 +48,24 @@ npm start
 The repository produces a static Vite build in `dist` and can be imported
 directly into Vercel with no server runtime.
 
+## YouTube Playables package
+
+```bash
+npm run pack:playables
+```
+
+This rebuilds the game and writes `release/nightfall-seven-playables.zip`, the
+archive to upload in the YouTube Playables console. `index.html` sits at the root
+of the archive.
+
+The Playables package is the web build minus assets that only matter to
+link-unfurling crawlers: `og.png` and its `og:image` tag are dropped, along with
+three unreferenced template SVGs. The Vercel deployment keeps them, so social
+previews still work there. The script fails the build if a packaged file is
+referenced but missing, a file name uses characters outside `A-Za-z0-9._-`, an
+absolute path or non-SDK external URL appears in `index.html`, the SDK does not
+precede the game module, or the payload exceeds the Playables limits.
+
 The production build loads the YouTube Playables v1 SDK before the game
 bundle. YouTube pause/resume events control the simulation, rendering, input,
 animations, timers, and Web Audio lifecycle. YouTube's audio setting is the

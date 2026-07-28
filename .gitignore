@@ -17,6 +17,7 @@
 /.next/
 /out/
 /dist/
+/release/
 /.wrangler/
 
 # misc
